@@ -1,0 +1,8 @@
+# LiveKit Agents Framework with Google and Deepgram plugins
+livekit-agents[google,deepgram]>=1.0.0
+
+# Silero VAD plugin
+livekit-plugins-silero>=1.0.0
+
+# Utilities
+python-dotenv>=1.0.0

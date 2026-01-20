@@ -1,0 +1,23 @@
+# LiveKit Server Configuration
+# For Vera - Voice AI for Elderly Users
+
+port: 7880
+rtc:
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+
+# Logging
+logging:
+  level: info
+
+# Room settings optimized for voice
+room:
+  # Auto-create rooms when agents/clients join
+  auto_create: true
+  # Max participants per room (Vera is 1-on-1)
+  max_participants: 3
+  # Empty room timeout
+  empty_timeout: 300
+
+# Keys are set via environment variable LIVEKIT_KEYS

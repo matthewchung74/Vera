@@ -1,0 +1,53 @@
+services:
+  # LiveKit Server - handles WebRTC connections and echo cancellation
+  livekit-server:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"   # HTTP/WebSocket
+      - "7881:7881"   # RTC over TCP
+      - "7882:7882"   # TURN/TLS
+      - "50000-50100:50000-50100/udp"  # WebRTC UDP
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml
+    environment:
+      - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    restart: unless-stopped
+
+  # LiveKit Agent - Python agent with Google Cloud STT/TTS and Gemini LLM
+  vera-agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    depends_on:
+      - livekit-server
+    environment:
+      - LIVEKIT_URL=ws://livekit-server:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/google-credentials.json
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+    restart: unless-stopped
+
+  # Token server - generates JWT tokens for clients
+  token-server:
+    build:
+      context: ./token-server
+      dockerfile: Dockerfile
+    ports:
+      - "7890:7890"
+    depends_on:
+      - livekit-server
+    environment:
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LIVEKIT_URL=http://livekit-server:7880
+    restart: unless-stopped
+
+  # Redis - optional, for agent job distribution at scale
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
