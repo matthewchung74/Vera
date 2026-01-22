@@ -52,14 +52,17 @@ Important behaviors:
 - If the user seems confused, offer to repeat or explain differently
 - Address the user respectfully
 - Never use emojis, asterisks, or complex formatting in your speech
+- NEVER read out loud any technical details like email IDs, codes, or system information
+- When listing emails, just say the sender and subject - never mention the email ID
 
 When discussing emails:
 - Use the search_emails tool to find specific emails
-- Use get_email_details tool to read the full content of an email
+- Use get_email_details tool to read the full content of an email (use the email ID internally, never say it out loud)
 - Prioritize emails from family members or about medical appointments
 - Warn clearly about any suspicious or scam emails
 - Summarize the key point of each email simply
 - If asked about "important" emails, search for personal messages, bills, and appointments
+- When the user asks to read a specific email, use the Email ID from the tool results to call get_email_details
 """
 
 
@@ -78,19 +81,18 @@ class VeraAgent(Agent):
         await asyncio.sleep(1.5)
         logger.info("Generating greeting")
 
-        has_email = bool(self.gmail_token or self.outlook_token)
-        if has_email:
-            self.session.generate_reply(
-                instructions="Greet the user warmly. Say 'Hello, I'm Vera. Your email is connected and I can help you search through your messages. How can I help you today?'"
-            )
-        else:
-            self.session.generate_reply(
-                instructions="Greet the user warmly. Say 'Hello, I'm Vera. How can I help you today?'"
-            )
+        # Simple greeting - don't mention email capabilities upfront
+        self.session.generate_reply(
+            instructions="Greet the user warmly. Say exactly: 'Hello, I'm Vera. How can I help you today?'"
+        )
 
     async def on_user_turn_completed(self, turn_ctx, new_message):
         """Called after user finishes speaking."""
-        logger.info(f"USER SAID: {new_message.text_content}")
+        logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] USER: {new_message.text_content}")
+
+    async def on_agent_speech_committed(self, message):
+        """Called when agent finishes speaking - log what Vera said."""
+        logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] VERA: {message.text_content}")
 
     @function_tool()
     async def search_emails(
@@ -108,29 +110,58 @@ class VeraAgent(Agent):
         logger.info(f"[TOOL] search_emails called: query='{query}', days_back={days_back}")
 
         results = []
+        gmail_auth_failed = False
+        outlook_auth_failed = False
 
         # Search Gmail
         if self.gmail_token:
             try:
-                gmail_results = await self._search_gmail(query, days_back)
-                results.extend(gmail_results)
-                logger.info(f"[TOOL] Gmail returned {len(gmail_results)} results")
+                gmail_results, auth_ok = await self._search_gmail(query, days_back)
+                if auth_ok:
+                    results.extend(gmail_results)
+                    logger.info(f"[TOOL] Gmail returned {len(gmail_results)} results")
+                else:
+                    gmail_auth_failed = True
+                    logger.error("[TOOL] Gmail authentication failed (401)")
             except Exception as e:
                 logger.error(f"[TOOL] Gmail search error: {e}")
 
         # Search Outlook
         if self.outlook_token:
             try:
-                outlook_results = await self._search_outlook(query, days_back)
-                results.extend(outlook_results)
-                logger.info(f"[TOOL] Outlook returned {len(outlook_results)} results")
+                outlook_results, auth_ok = await self._search_outlook(query, days_back)
+                if auth_ok:
+                    results.extend(outlook_results)
+                    logger.info(f"[TOOL] Outlook returned {len(outlook_results)} results")
+                else:
+                    outlook_auth_failed = True
+                    logger.error("[TOOL] Outlook authentication failed (401)")
             except Exception as e:
                 logger.error(f"[TOOL] Outlook search error: {e}")
+
+        # Handle auth failures - be clear with user
+        if gmail_auth_failed and outlook_auth_failed:
+            return "I cannot access your email right now. Your email connections have expired. Please go to the settings in the app and reconnect your Gmail and Outlook accounts."
+        if gmail_auth_failed and not self.outlook_token:
+            return "I cannot access your Gmail right now. The connection has expired. Please go to the settings in the app and reconnect your Gmail account."
+        if outlook_auth_failed and not self.gmail_token:
+            return "I cannot access your Outlook right now. The connection has expired. Please go to the settings in the app and reconnect your Outlook account."
 
         if not results:
             if not self.gmail_token and not self.outlook_token:
                 return "No email accounts are connected. Please connect Gmail or Outlook in the app settings."
-            return f"No emails found matching '{query}' in the last {days_back} days."
+
+            # Build message about which accounts were searched
+            searched = []
+            if self.gmail_token and not gmail_auth_failed:
+                searched.append("Gmail")
+            if self.outlook_token and not outlook_auth_failed:
+                searched.append("Outlook")
+
+            if not searched:
+                return "I cannot access any email accounts right now. Please reconnect them in the app settings."
+
+            return f"I searched your {' and '.join(searched)} but found no emails matching '{query}' in the last {days_back} days."
 
         # Format results
         output = f"Found {len(results)} email(s) matching '{query}':\n\n"
@@ -138,7 +169,7 @@ class VeraAgent(Agent):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
             output += f"   Date: {email['date']}\n"
-            output += f"   ID: {email['id']}\n\n"
+            output += f"   [Email ID: {email['id']}]\n\n"
             # Cache for later detail lookup
             self._email_cache[email['id']] = email
 
@@ -150,10 +181,12 @@ class VeraAgent(Agent):
         context: RunContext,
         email_id: str,
     ) -> str:
-        """Get the full content of a specific email.
+        """Get the full content of a specific email by its ID.
 
         Args:
-            email_id: The email ID from a previous search result
+            email_id: The unique email ID string that starts with 'gmail_' or 'outlook_'
+                      (e.g., 'gmail_19bdeb6dbe8983aa' or 'outlook_AAMkAGI2...').
+                      This ID is shown in the search results. Do NOT use the list number.
         """
         logger.info(f"[TOOL] get_email_details called: email_id='{email_id}'")
 
@@ -198,27 +231,58 @@ class VeraAgent(Agent):
 
         count = min(count, 10)  # Cap at 10
         results = []
+        gmail_auth_failed = False
+        outlook_auth_failed = False
 
         # Get from Gmail
         if self.gmail_token:
             try:
-                gmail_results = await self._get_recent_gmail(count)
-                results.extend(gmail_results)
+                gmail_results, auth_ok = await self._get_recent_gmail(count)
+                if auth_ok:
+                    results.extend(gmail_results)
+                    logger.info(f"[TOOL] Gmail returned {len(gmail_results)} recent emails")
+                else:
+                    gmail_auth_failed = True
+                    logger.error("[TOOL] Gmail authentication failed (401)")
             except Exception as e:
                 logger.error(f"[TOOL] Gmail recent error: {e}")
 
         # Get from Outlook
         if self.outlook_token:
             try:
-                outlook_results = await self._get_recent_outlook(count)
-                results.extend(outlook_results)
+                outlook_results, auth_ok = await self._get_recent_outlook(count)
+                if auth_ok:
+                    results.extend(outlook_results)
+                    logger.info(f"[TOOL] Outlook returned {len(outlook_results)} recent emails")
+                else:
+                    outlook_auth_failed = True
+                    logger.error("[TOOL] Outlook authentication failed (401)")
             except Exception as e:
                 logger.error(f"[TOOL] Outlook recent error: {e}")
 
+        # Handle auth failures - be clear with user
+        if gmail_auth_failed and outlook_auth_failed:
+            return "I cannot access your email right now. Your email connections have expired. Please go to the settings in the app and reconnect your Gmail and Outlook accounts."
+        if gmail_auth_failed and not self.outlook_token:
+            return "I cannot access your Gmail right now. The connection has expired. Please go to the settings in the app and reconnect your Gmail account."
+        if outlook_auth_failed and not self.gmail_token:
+            return "I cannot access your Outlook right now. The connection has expired. Please go to the settings in the app and reconnect your Outlook account."
+
         if not results:
             if not self.gmail_token and not self.outlook_token:
-                return "No email accounts are connected."
-            return "No recent emails found."
+                return "No email accounts are connected. Please connect Gmail or Outlook in the app settings."
+
+            # Build message about which accounts were searched
+            searched = []
+            if self.gmail_token and not gmail_auth_failed:
+                searched.append("Gmail")
+            if self.outlook_token and not outlook_auth_failed:
+                searched.append("Outlook")
+
+            if not searched:
+                return "I cannot access any email accounts right now. Please reconnect them in the app settings."
+
+            return f"I checked your {' and '.join(searched)} but found no recent emails."
 
         # Sort by date and take top N
         results.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
@@ -228,15 +292,16 @@ class VeraAgent(Agent):
         for i, email in enumerate(results, 1):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
-            output += f"   Date: {email['date']}\n\n"
+            output += f"   Date: {email['date']}\n"
+            output += f"   [Email ID: {email['id']}]\n\n"
             self._email_cache[email['id']] = email
 
         return output
 
     # ==================== Gmail API Methods ====================
 
-    async def _search_gmail(self, query: str, days_back: int) -> list:
-        """Search Gmail using the API."""
+    async def _search_gmail(self, query: str, days_back: int) -> tuple:
+        """Search Gmail using the API. Returns (results, auth_ok)."""
         after_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y/%m/%d')
         search_query = f"{query} after:{after_date}"
 
@@ -247,9 +312,12 @@ class VeraAgent(Agent):
             headers = {"Authorization": f"Bearer {self.gmail_token}"}
 
             async with session.get(url, params=params, headers=headers) as resp:
+                if resp.status == 401:
+                    logger.error("Gmail search failed: 401 Unauthorized")
+                    return [], False
                 if resp.status != 200:
                     logger.error(f"Gmail search failed: {resp.status}")
-                    return []
+                    return [], True  # Not an auth failure, just an error
                 data = await resp.json()
 
             messages = data.get("messages", [])
@@ -261,7 +329,7 @@ class VeraAgent(Agent):
                 if email:
                     results.append(email)
 
-            return results
+            return results, True
 
     async def _get_gmail_message_summary(self, session: aiohttp.ClientSession, msg_id: str) -> dict:
         """Get summary of a Gmail message."""
@@ -334,16 +402,20 @@ class VeraAgent(Agent):
 
         return "(Could not extract email body)"
 
-    async def _get_recent_gmail(self, count: int) -> list:
-        """Get recent Gmail messages."""
+    async def _get_recent_gmail(self, count: int) -> tuple:
+        """Get recent Gmail messages. Returns (results, auth_ok)."""
         async with aiohttp.ClientSession() as session:
             url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages"
             params = {"maxResults": count}
             headers = {"Authorization": f"Bearer {self.gmail_token}"}
 
             async with session.get(url, params=params, headers=headers) as resp:
+                if resp.status == 401:
+                    logger.error("Gmail recent failed: 401 Unauthorized")
+                    return [], False
                 if resp.status != 200:
-                    return []
+                    logger.error(f"Gmail recent failed: {resp.status}")
+                    return [], True  # Not an auth failure, just an error
                 data = await resp.json()
 
             messages = data.get("messages", [])
@@ -354,28 +426,31 @@ class VeraAgent(Agent):
                 if email:
                     results.append(email)
 
-            return results
+            return results, True
 
     # ==================== Outlook API Methods ====================
 
-    async def _search_outlook(self, query: str, days_back: int) -> list:
-        """Search Outlook using Microsoft Graph API."""
-        after_date = (datetime.now() - timedelta(days=days_back)).isoformat() + "Z"
+    async def _search_outlook(self, query: str, days_back: int) -> tuple:
+        """Search Outlook using Microsoft Graph API. Returns (results, auth_ok)."""
+        # Note: Microsoft Graph doesn't allow $search + $filter together
+        # $search returns results by relevance, typically recent first
 
         async with aiohttp.ClientSession() as session:
             url = "https://graph.microsoft.com/v1.0/me/messages"
             params = {
                 "$search": f'"{query}"',
-                "$filter": f"receivedDateTime ge {after_date}",
                 "$top": 10,
                 "$select": "id,from,subject,receivedDateTime",
             }
             headers = {"Authorization": f"Bearer {self.outlook_token}"}
 
             async with session.get(url, params=params, headers=headers) as resp:
+                if resp.status == 401:
+                    logger.error("Outlook search failed: 401 Unauthorized")
+                    return [], False
                 if resp.status != 200:
                     logger.error(f"Outlook search failed: {resp.status}")
-                    return []
+                    return [], True  # Not an auth failure, just an error
                 data = await resp.json()
 
             results = []
@@ -389,7 +464,7 @@ class VeraAgent(Agent):
                 }
                 results.append(email)
 
-            return results
+            return results, True
 
     async def _get_outlook_email(self, msg_id: str) -> dict:
         """Get full Outlook message including body."""
@@ -411,8 +486,8 @@ class VeraAgent(Agent):
             "body": msg.get("body", {}).get("content", "(No content)"),
         }
 
-    async def _get_recent_outlook(self, count: int) -> list:
-        """Get recent Outlook messages."""
+    async def _get_recent_outlook(self, count: int) -> tuple:
+        """Get recent Outlook messages. Returns (results, auth_ok)."""
         async with aiohttp.ClientSession() as session:
             url = "https://graph.microsoft.com/v1.0/me/messages"
             params = {
@@ -423,8 +498,12 @@ class VeraAgent(Agent):
             headers = {"Authorization": f"Bearer {self.outlook_token}"}
 
             async with session.get(url, params=params, headers=headers) as resp:
+                if resp.status == 401:
+                    logger.error("Outlook recent failed: 401 Unauthorized")
+                    return [], False
                 if resp.status != 200:
-                    return []
+                    logger.error(f"Outlook recent failed: {resp.status}")
+                    return [], True  # Not an auth failure, just an error
                 data = await resp.json()
 
             results = []
@@ -438,22 +517,35 @@ class VeraAgent(Agent):
                 }
                 results.append(email)
 
-            return results
+            return results, True
 
 
-async def wait_for_tokens(room, timeout=5.0) -> dict:
+async def wait_for_tokens(room, timeout=10.0) -> dict:
     """Wait for OAuth tokens from client metadata."""
 
+    def check_participants():
+        """Check all participants for token metadata."""
+        for participant in room.remote_participants.values():
+            logger.info(f"Checking participant: {participant.identity}, has_metadata: {bool(participant.metadata)}")
+            if participant.metadata:
+                try:
+                    metadata = json.loads(participant.metadata)
+                    # Check if tokens are actually present (not empty strings)
+                    gmail = metadata.get("gmail_token", "")
+                    outlook = metadata.get("outlook_token", "")
+                    if gmail or outlook:
+                        logger.info(f"Found tokens in metadata - Gmail: {'yes' if gmail else 'no'}, Outlook: {'yes' if outlook else 'no'}")
+                        return metadata
+                    else:
+                        logger.info("Metadata found but tokens are empty")
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse participant metadata as JSON")
+        return None
+
     # Check existing participants first
-    for participant in room.remote_participants.values():
-        if participant.metadata:
-            try:
-                metadata = json.loads(participant.metadata)
-                if "gmail_token" in metadata or "outlook_token" in metadata:
-                    logger.info("Found existing token metadata")
-                    return metadata
-            except json.JSONDecodeError:
-                pass
+    existing = check_participants()
+    if existing:
+        return existing
 
     # Wait for metadata update event
     logger.info("Waiting for token metadata from client...")
@@ -461,22 +553,32 @@ async def wait_for_tokens(room, timeout=5.0) -> dict:
     result = {}
 
     def on_metadata_changed(participant: rtc.Participant, old_metadata: str, new_metadata: str):
+        logger.info(f"Metadata changed for {participant.identity}")
         if new_metadata:
             try:
                 metadata = json.loads(new_metadata)
-                if "gmail_token" in metadata or "outlook_token" in metadata:
+                gmail = metadata.get("gmail_token", "")
+                outlook = metadata.get("outlook_token", "")
+                if gmail or outlook:
                     result.update(metadata)
-                    logger.info("Received token metadata from client")
+                    logger.info(f"Received tokens - Gmail: {'yes' if gmail else 'no'}, Outlook: {'yes' if outlook else 'no'}")
                     event.set()
+                else:
+                    logger.info("Metadata received but tokens are empty strings")
             except json.JSONDecodeError:
-                pass
+                logger.warning("Failed to parse new metadata as JSON")
 
     room.on("participant_metadata_changed", on_metadata_changed)
 
     try:
         await asyncio.wait_for(event.wait(), timeout=timeout)
     except asyncio.TimeoutError:
-        logger.info("Timeout waiting for token metadata")
+        logger.info(f"Timeout after {timeout}s waiting for token metadata")
+        # One final check after timeout
+        final_check = check_participants()
+        if final_check:
+            logger.info("Found tokens in final check after timeout")
+            result.update(final_check)
 
     room.off("participant_metadata_changed", on_metadata_changed)
     return result
@@ -513,7 +615,7 @@ async def entrypoint(ctx: JobContext):
         vad=silero.VAD.load(),
         turn_detection="vad",
         allow_interruptions=True,
-        min_interruption_duration=0.5,
+        min_interruption_duration=1.5,
     )
 
     # Add event handlers for debugging

@@ -16,6 +16,7 @@ import {
   useRoomContext,
   useTracks,
   useIOSAudioManagement,
+  useRemoteParticipants,
 } from '@livekit/react-native';
 import { Track, RoomEvent, ConnectionState } from 'livekit-client';
 
@@ -45,7 +46,9 @@ function RoomContent({
 }) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
+  const remoteParticipants = useRemoteParticipants();
   const metadataSetRef = useRef(false);
+  const [agentState, setAgentState] = useState<string>('listening');
 
   // Get remote audio tracks (agent's voice) - include all audio sources
   const audioTracks = useTracks(
@@ -58,6 +61,26 @@ function RoomContent({
     (track) => track.participant.identity !== localParticipant?.identity
   );
 
+  // Find the agent participant and track their state attribute
+  useEffect(() => {
+    const agentParticipant = remoteParticipants.find(p =>
+      p.identity.includes('agent') || p.attributes?.['lk.agent.state']
+    );
+
+    if (agentParticipant) {
+      // LiveKit agents publish their state via participant attributes
+      const state = agentParticipant.attributes?.['lk.agent.state'];
+      if (state) {
+        console.log(`[AGENT] Agent state attribute: ${state}`);
+        setAgentState(state);
+      }
+    } else {
+      // Agent disconnected or not present - reset to listening
+      console.log('[AGENT] No agent found, resetting state to listening');
+      setAgentState('listening');
+    }
+  }, [remoteParticipants]);
+
   // Log audio track changes for debugging
   useEffect(() => {
     console.log(`[AUDIO] Total tracks: ${audioTracks.length}, Remote tracks: ${remoteAudioTracks.length}`);
@@ -66,38 +89,52 @@ function RoomContent({
     });
   }, [audioTracks.length, remoteAudioTracks.length]);
 
-  // Update state based on whether agent is speaking
+  // Update state based on agent's actual state (not just track presence)
   useEffect(() => {
-    if (remoteAudioTracks.length > 0) {
-      console.log('[STATE] Agent has audio track -> speaking');
+    if (room?.state !== ConnectionState.Connected) {
+      return;
+    }
+
+    // Use the agent's published state attribute
+    // Possible values: 'listening', 'thinking', 'speaking'
+    if (agentState === 'speaking') {
+      console.log('[STATE] Agent state is speaking');
       setState('speaking');
-    } else if (room?.state === ConnectionState.Connected) {
-      console.log('[STATE] No remote audio -> listening');
+    } else {
+      // Agent is listening or thinking - we're in listening mode
+      console.log(`[STATE] Agent state is ${agentState} -> listening`);
       setState('listening');
     }
-  }, [remoteAudioTracks.length, room?.state, setState]);
+  }, [agentState, room?.state, setState]);
 
   // Set metadata when connected (pass OAuth tokens for email tools)
   useEffect(() => {
     const setMetadata = async () => {
+      console.log(`[METADATA] Check: room=${room?.state}, participant=${localParticipant?.identity}, alreadySet=${metadataSetRef.current}`);
+
       // Only set metadata when room is fully connected
       if (room?.state === ConnectionState.Connected &&
           localParticipant &&
           !metadataSetRef.current) {
         try {
-          // Get OAuth tokens to pass to agent for email tools
-          const gmailToken = await getGmailToken();
-          const outlookToken = await getOutlookToken();
+          console.log('[METADATA] Room connected, fetching tokens...');
 
-          console.log('[METADATA] Setting token metadata...');
-          console.log(`[METADATA] Gmail: ${gmailToken ? 'yes' : 'no'}, Outlook: ${outlookToken ? 'yes' : 'no'}`);
+          // Get OAuth tokens to pass to agent for email tools
+          const startTime = Date.now();
+          const gmailToken = await getGmailToken();
+          console.log(`[METADATA] Gmail token fetch took ${Date.now() - startTime}ms, result: ${gmailToken ? 'got token' : 'null'}`);
+
+          const outlookToken = await getOutlookToken();
+          console.log(`[METADATA] Outlook token fetch took ${Date.now() - startTime}ms, result: ${outlookToken ? 'got token' : 'null'}`);
+
+          console.log(`[METADATA] Setting metadata with Gmail: ${gmailToken ? 'yes' : 'no'}, Outlook: ${outlookToken ? 'yes' : 'no'}`);
 
           await localParticipant.setMetadata(JSON.stringify({
             gmail_token: gmailToken || '',
             outlook_token: outlookToken || '',
           }));
           metadataSetRef.current = true;
-          console.log('[METADATA] Token metadata set successfully');
+          console.log(`[METADATA] Token metadata set successfully (total time: ${Date.now() - startTime}ms)`);
         } catch (err) {
           console.log('[METADATA] Failed to set metadata:', err);
         }
@@ -132,6 +169,22 @@ function RoomContent({
 
     const handleParticipantConnected = (participant: any) => {
       console.log(`[ROOM] Participant connected: ${participant.identity}`);
+      // Check if this is the agent and get initial state
+      const state = participant.attributes?.['lk.agent.state'];
+      if (state) {
+        console.log(`[ROOM] Agent initial state: ${state}`);
+        setAgentState(state);
+      }
+    };
+
+    const handleAttributesChanged = (changedAttributes: Record<string, string>, participant: any) => {
+      console.log(`[ROOM] Attributes changed for ${participant.identity}:`, changedAttributes);
+      // Check for agent state change
+      const state = changedAttributes['lk.agent.state'];
+      if (state) {
+        console.log(`[AGENT] State changed to: ${state}`);
+        setAgentState(state);
+      }
     };
 
     const handleTrackSubscribed = (track: any, publication: any, participant: any) => {
@@ -147,13 +200,20 @@ function RoomContent({
 
     room.on(RoomEvent.Disconnected, handleDisconnected);
     room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+    room.on(RoomEvent.ParticipantAttributesChanged, handleAttributesChanged);
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
     room.on(RoomEvent.TrackPublished, handleTrackPublished);
 
-    // Log current state
+    // Log current state and check for existing agent
     console.log(`[ROOM] Current participants: ${room.remoteParticipants.size}`);
     room.remoteParticipants.forEach((p: any) => {
       console.log(`[ROOM] Existing participant: ${p.identity}`);
+      // Check if existing participant is agent with state
+      const state = p.attributes?.['lk.agent.state'];
+      if (state) {
+        console.log(`[ROOM] Found existing agent with state: ${state}`);
+        setAgentState(state);
+      }
       p.trackPublications.forEach((pub: any) => {
         console.log(`[ROOM] - Track: ${pub.kind} subscribed: ${pub.isSubscribed}`);
       });
@@ -162,10 +222,11 @@ function RoomContent({
     return () => {
       room.off(RoomEvent.Disconnected, handleDisconnected);
       room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
+      room.off(RoomEvent.ParticipantAttributesChanged, handleAttributesChanged);
       room.off(RoomEvent.TrackSubscribed, handleTrackSubscribed);
       room.off(RoomEvent.TrackPublished, handleTrackPublished);
     };
-  }, [room, setState]);
+  }, [room, setState, setAgentState]);
 
   // Render iOS audio manager when room is connected
   if (room && room.state === ConnectionState.Connected) {
