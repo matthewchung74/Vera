@@ -21,6 +21,8 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - livekit-server
+    volumes:
+      - ./agent/vera_agent.py:/app/vera_agent.py
     environment:
       - LIVEKIT_URL=ws://livekit-server:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}

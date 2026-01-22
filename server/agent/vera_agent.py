@@ -20,7 +20,7 @@ from livekit.agents import (
     function_tool,
     RunContext,
 )
-from livekit.agents.voice import AgentSession, Agent
+from livekit.agents.voice import AgentSession, Agent, room_io
 from livekit.plugins import google, silero, deepgram
 from livekit import rtc
 
@@ -79,12 +79,11 @@ class VeraAgent(Agent):
         """Called when agent becomes active."""
         logger.info("Vera agent entered - waiting before greeting")
         await asyncio.sleep(1.5)
-        logger.info("Generating greeting")
+        logger.info("Speaking greeting directly")
 
-        # Simple greeting - don't mention email capabilities upfront
-        self.session.generate_reply(
-            instructions="Greet the user warmly. Say exactly: 'Hello, I'm Vera. How can I help you today?'"
-        )
+        # Direct speech output - not LLM generated, prevents proactive additions
+        # Disable interruptions for greeting to prevent echo from cutting it off
+        await self.session.say("Hello, I'm Vera. How can I help you today?", allow_interruptions=False)
 
     async def on_user_turn_completed(self, turn_ctx, new_message):
         """Called after user finishes speaking."""
@@ -189,31 +188,46 @@ class VeraAgent(Agent):
                       This ID is shown in the search results. Do NOT use the list number.
         """
         logger.info(f"[TOOL] get_email_details called: email_id='{email_id}'")
+        logger.info(f"[TOOL] Cache has {len(self._email_cache)} items, looking for: {email_id}")
 
         # Check cache first
         if email_id in self._email_cache:
             email = self._email_cache[email_id]
+            logger.info(f"[TOOL] Found in cache: {email.get('subject', 'no subject')}")
             if 'body' in email:
+                body_preview = email['body'][:200] if email['body'] else 'empty'
+                logger.info(f"[TOOL] Returning cached email, body preview: {body_preview}")
                 return f"From: {email['from']}\nSubject: {email['subject']}\nDate: {email['date']}\n\nContent:\n{email['body']}"
 
         # Fetch from Gmail
         if email_id.startswith('gmail_') and self.gmail_token:
+            logger.info(f"[TOOL] Fetching from Gmail API...")
             try:
                 email = await self._get_gmail_email(email_id.replace('gmail_', ''))
                 if email:
+                    body_preview = email.get('body', '')[:200] if email.get('body') else 'empty'
+                    logger.info(f"[TOOL] Gmail returned email, body preview: {body_preview}")
                     return f"From: {email['from']}\nSubject: {email['subject']}\nDate: {email['date']}\n\nContent:\n{email['body']}"
+                else:
+                    logger.warning(f"[TOOL] Gmail returned None for email_id: {email_id}")
             except Exception as e:
                 logger.error(f"[TOOL] Gmail fetch error: {e}")
 
         # Fetch from Outlook
         if email_id.startswith('outlook_') and self.outlook_token:
+            logger.info(f"[TOOL] Fetching from Outlook API...")
             try:
                 email = await self._get_outlook_email(email_id.replace('outlook_', ''))
                 if email:
+                    body_preview = email.get('body', '')[:200] if email.get('body') else 'empty'
+                    logger.info(f"[TOOL] Outlook returned email, body preview: {body_preview}")
                     return f"From: {email['from']}\nSubject: {email['subject']}\nDate: {email['date']}\n\nContent:\n{email['body']}"
+                else:
+                    logger.warning(f"[TOOL] Outlook returned None for email_id: {email_id}")
             except Exception as e:
                 logger.error(f"[TOOL] Outlook fetch error: {e}")
 
+        logger.warning(f"[TOOL] Could not find email: {email_id}")
         return f"Could not find email with ID: {email_id}"
 
     @function_tool()
@@ -389,16 +403,78 @@ class VeraAgent(Agent):
         return email
 
     def _extract_gmail_body(self, payload: dict) -> str:
-        """Extract text body from Gmail payload."""
+        """Extract text body from Gmail payload, handling HTML if needed."""
         import base64
+        import re
 
+        def decode_body(data: str) -> str:
+            return base64.urlsafe_b64decode(data).decode("utf-8", errors="ignore")
+
+        def html_to_text(html: str) -> str:
+            """Simple HTML to text conversion."""
+            # Remove style and script tags with content
+            text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            # Convert common tags
+            text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+            text = re.sub(r'<p[^>]*>', '\n', text, flags=re.IGNORECASE)
+            text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)
+            text = re.sub(r'<div[^>]*>', '\n', text, flags=re.IGNORECASE)
+            text = re.sub(r'<li[^>]*>', '\n• ', text, flags=re.IGNORECASE)
+            # Remove all other tags
+            text = re.sub(r'<[^>]+>', '', text)
+            # Decode HTML entities
+            text = re.sub(r'&nbsp;', ' ', text)
+            text = re.sub(r'&amp;', '&', text)
+            text = re.sub(r'&lt;', '<', text)
+            text = re.sub(r'&gt;', '>', text)
+            text = re.sub(r'&quot;', '"', text)
+            text = re.sub(r'&#\d+;', '', text)  # Remove numeric entities
+            # Clean up whitespace
+            text = re.sub(r'\n\s*\n', '\n\n', text)
+            text = re.sub(r' +', ' ', text)
+            return text.strip()
+
+        def extract_from_parts(parts: list) -> str:
+            """Recursively extract body from parts, preferring plain text."""
+            plain_text = None
+            html_text = None
+
+            for part in parts:
+                mime = part.get("mimeType", "")
+
+                # Recursively handle nested multipart
+                if mime.startswith("multipart/") and "parts" in part:
+                    nested = extract_from_parts(part["parts"])
+                    if nested:
+                        return nested
+
+                # Get plain text (preferred)
+                if mime == "text/plain" and part.get("body", {}).get("data"):
+                    plain_text = decode_body(part["body"]["data"])
+
+                # Get HTML as fallback
+                if mime == "text/html" and part.get("body", {}).get("data"):
+                    html_text = decode_body(part["body"]["data"])
+
+            if plain_text:
+                return plain_text
+            if html_text:
+                return html_to_text(html_text)
+            return None
+
+        # Direct body (simple message)
         if "body" in payload and payload["body"].get("data"):
-            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="ignore")
+            body = decode_body(payload["body"]["data"])
+            if payload.get("mimeType") == "text/html":
+                return html_to_text(body)
+            return body
 
+        # Multipart message
         if "parts" in payload:
-            for part in payload["parts"]:
-                if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
-                    return base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="ignore")
+            result = extract_from_parts(payload["parts"])
+            if result:
+                return result
 
         return "(Could not extract email body)"
 
@@ -606,16 +682,20 @@ async def entrypoint(ctx: JobContext):
             language="en-US",
         ),
         llm=google.LLM(
-            model="gemini-2.0-flash",
+            model="gemini-3-flash-preview",
             temperature=0.7,
         ),
         tts=deepgram.TTS(
             model="aura-2-thalia-en",
         ),
-        vad=silero.VAD.load(),
+        vad=silero.VAD.load(
+            min_speech_duration=0.3,  # Require longer speech to trigger
+            min_silence_duration=0.5,  # Require longer silence to end turn
+            activation_threshold=0.6,  # Higher threshold = less sensitive
+        ),
         turn_detection="vad",
         allow_interruptions=True,
-        min_interruption_duration=1.5,
+        min_interruption_duration=2.0,  # Require 2 seconds of speech to interrupt
     )
 
     # Add event handlers for debugging
@@ -627,10 +707,22 @@ async def entrypoint(ctx: JobContext):
     def on_error(error):
         logger.error(f">>> Session error: {error}")
 
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(item):
+        # Log what the agent says for debugging
+        if hasattr(item, 'role') and item.role == 'assistant':
+            text = getattr(item, 'text_content', None) or getattr(item, 'content', None) or str(item)
+            logger.info(f">>> VERA SAID: {text[:500]}...")  # Truncate long responses
+
     # Start the session with custom agent
+    # Keep agent alive even when participant disconnects (allows reconnection)
+    room_options = room_io.RoomOptions(
+        close_on_disconnect=False,
+    )
     await session.start(
         room=ctx.room,
         agent=VeraAgent(gmail_token=gmail_token, outlook_token=outlook_token),
+        room_options=room_options,
     )
 
     logger.info(f"Vera is now listening with email tools...")
