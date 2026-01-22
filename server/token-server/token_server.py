@@ -26,6 +26,9 @@ app.add_middleware(
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secretsecretsecretsecretsecretsecret")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "http://livekit-server:7880")
+# Client-facing WebSocket URL (for mobile app to connect)
+# Defaults to localhost for local dev, override for production deployments
+LIVEKIT_WS_URL = os.getenv("LIVEKIT_WS_URL", "ws://localhost:7880")
 
 
 @app.get("/token")
@@ -54,7 +57,7 @@ async def get_token(
         "token": jwt_token,
         "room": room,
         "identity": identity,
-        "url": "ws://localhost:7880",
+        "url": LIVEKIT_WS_URL,
     }
 
 

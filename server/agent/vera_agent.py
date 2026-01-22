@@ -162,33 +162,51 @@ class VeraAgent(Agent):
 
             return f"I searched your {' and '.join(searched)} but found no emails matching '{query}' in the last {days_back} days."
 
-        # Format results
+        # Format results - IDs are for internal tool use only, never spoken aloud
         output = f"Found {len(results)} email(s) matching '{query}':\n\n"
         for i, email in enumerate(results[:10], 1):  # Limit to 10 results
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
             output += f"   Date: {email['date']}\n"
-            output += f"   [Email ID: {email['id']}]\n\n"
             # Cache for later detail lookup
             self._email_cache[email['id']] = email
+            # Store mapping from list number to ID for easy reference
+            self._email_cache[f"#{i}"] = email
 
+        output += "(To read an email, use the number like 'read email 1' or 'the first one')"
         return output
 
     @function_tool()
     async def get_email_details(
         self,
         context: RunContext,
-        email_id: str,
+        email_ref: str,
     ) -> str:
-        """Get the full content of a specific email by its ID.
+        """Get the full content of a specific email.
 
         Args:
-            email_id: The unique email ID string that starts with 'gmail_' or 'outlook_'
-                      (e.g., 'gmail_19bdeb6dbe8983aa' or 'outlook_AAMkAGI2...').
-                      This ID is shown in the search results. Do NOT use the list number.
+            email_ref: Reference to the email. Can be:
+                       - A number from the list (e.g., "1", "2", "3")
+                       - Words like "first", "second", "third"
+                       - The full email ID if known
         """
-        logger.info(f"[TOOL] get_email_details called: email_id='{email_id}'")
-        logger.info(f"[TOOL] Cache has {len(self._email_cache)} items, looking for: {email_id}")
+        logger.info(f"[TOOL] get_email_details called: email_ref='{email_ref}'")
+        logger.info(f"[TOOL] Cache has {len(self._email_cache)} items")
+
+        # Convert reference to cache key
+        email_id = email_ref.strip()
+
+        # Handle number references
+        number_words = {"first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5",
+                        "1st": "1", "2nd": "2", "3rd": "3", "4th": "4", "5th": "5"}
+        if email_id.lower() in number_words:
+            email_id = f"#{number_words[email_id.lower()]}"
+        elif email_id.isdigit():
+            email_id = f"#{email_id}"
+        elif email_id.startswith("#") and email_id[1:].isdigit():
+            pass  # Already in correct format
+
+        logger.info(f"[TOOL] Resolved to cache key: {email_id}")
 
         # Check cache first
         if email_id in self._email_cache:
@@ -198,6 +216,11 @@ class VeraAgent(Agent):
                 body_preview = email['body'][:200] if email['body'] else 'empty'
                 logger.info(f"[TOOL] Returning cached email, body preview: {body_preview}")
                 return f"From: {email['from']}\nSubject: {email['subject']}\nDate: {email['date']}\n\nContent:\n{email['body']}"
+            # No body yet - use the actual email ID to fetch full content
+            actual_id = email.get('id', '')
+            if actual_id:
+                logger.info(f"[TOOL] No body in cache, fetching with actual ID: {actual_id}")
+                email_id = actual_id
 
         # Fetch from Gmail
         if email_id.startswith('gmail_') and self.gmail_token:
@@ -302,14 +325,17 @@ class VeraAgent(Agent):
         results.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
         results = results[:count]
 
+        # Format results - never mention email IDs to user
         output = f"Your {len(results)} most recent emails:\n\n"
         for i, email in enumerate(results, 1):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
-            output += f"   Date: {email['date']}\n"
-            output += f"   [Email ID: {email['id']}]\n\n"
+            output += f"   Date: {email['date']}\n\n"
             self._email_cache[email['id']] = email
+            # Store mapping from list number to ID for easy reference
+            self._email_cache[f"#{i}"] = email
 
+        output += "(To read an email, use the number like 'read email 1' or 'the first one')"
         return output
 
     # ==================== Gmail API Methods ====================
