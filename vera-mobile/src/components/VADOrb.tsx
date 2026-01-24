@@ -43,7 +43,7 @@ export function VADOrb({
     : isVADActive
     ? 'pulse'
     : isListening
-    ? 'ear'
+    ? 'mic'
     : 'mic';
 
   return (
@@ -53,7 +53,7 @@ export function VADOrb({
       style={styles.container}
     >
       <View style={[styles.orb, { backgroundColor: currentColor }]}>
-        <Ionicons name={iconName as any} size={36} color="white" />
+        <Ionicons name={iconName as any} size={28} color="white" />
       </View>
     </TouchableOpacity>
   );
@@ -61,21 +61,21 @@ export function VADOrb({
 
 const styles = StyleSheet.create({
   container: {
-    width: 140,
-    height: 140,
+    width: 100,
+    height: 100,
     justifyContent: 'center',
     alignItems: 'center',
   },
   orb: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
   },
 });

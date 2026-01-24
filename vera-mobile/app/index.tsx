@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
+  Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,9 @@ import {
 import { Track, RoomEvent, ConnectionState } from 'livekit-client';
 
 import { VADOrb } from '../src/components/VADOrb';
+import { MessageList, TranscriptMessage } from '../src/components/MessageList';
+import { AttachmentInfo } from '../src/components/AttachmentIndicator';
+import { AttachmentViewer } from '../src/components/AttachmentViewer';
 import { getGmailToken, getOutlookToken } from '../src/services/authService';
 
 // Server config - use localhost for simulator, your Mac's IP for physical device
@@ -40,9 +43,15 @@ function IOSAudioManager({ room }: { room: any }) {
 function RoomContent({
   state,
   setState,
+  setMessages,
+  setAttachments,
+  currentBatchIdRef,
 }: {
   state: AppState;
   setState: (s: AppState) => void;
+  setMessages: React.Dispatch<React.SetStateAction<TranscriptMessage[]>>;
+  setAttachments: React.Dispatch<React.SetStateAction<AttachmentInfo[]>>;
+  currentBatchIdRef: React.MutableRefObject<string | null>;
 }) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
@@ -198,11 +207,110 @@ function RoomContent({
       console.log(`[ROOM] Track published: ${publication.kind} from ${participant.identity}`);
     };
 
+    const handleDataReceived = (
+      payload: Uint8Array,
+      participant: any,
+      kind: any,
+      topic?: string
+    ) => {
+      try {
+        const text = new TextDecoder().decode(payload);
+        const data = JSON.parse(text);
+
+        // Note: Transcripts now handled by TranscriptionReceived event, not data channel
+
+        // Handle attachment messages
+        if (topic === 'attachment') {
+          if (!data.id || data.type !== 'attachment') {
+            console.log('[DATA] Malformed attachment message, ignoring');
+            return;
+          }
+
+          // Extract batch ID from attachment ID (format: "gmail_<msgid>_<filename>")
+          const idParts = data.id.split('_');
+          const batchId = idParts.length >= 2 ? `${idParts[0]}_${idParts[1]}` : data.id;
+
+          // If new batch, clear old attachments
+          if (currentBatchIdRef.current !== batchId) {
+            console.log(`[ATTACHMENT] New batch: ${batchId}, clearing old attachments`);
+            setAttachments([]);
+            currentBatchIdRef.current = batchId;
+          }
+
+          const attachment: AttachmentInfo = {
+            id: data.id,
+            name: data.name || 'unknown',
+            mimeType: data.mimeType || 'application/octet-stream',
+            size: data.size || 0,
+            dataAvailable: data.dataAvailable ?? false,
+            data: data.data,
+          };
+
+          console.log(`[ATTACHMENT] Received: ${attachment.name} (${attachment.size} bytes, dataAvailable=${attachment.dataAvailable})`);
+
+          // Add attachment, deduping by id
+          setAttachments((prev) => {
+            if (prev.some((a) => a.id === attachment.id)) {
+              return prev;
+            }
+            // Limit to 10 attachments
+            const newList = [...prev, attachment];
+            return newList.slice(-10);
+          });
+        }
+      } catch (e) {
+        console.log('[DATA] Failed to parse data:', e);
+      }
+    };
+
+    // Handle transcription received (built-in LiveKit transcription)
+    const handleTranscriptionReceived = (
+      segments: any[],
+      participant: any,
+      publication: any
+    ) => {
+      // Combine all segment texts
+      const fullText = segments.map((s: any) => s.text).join(' ');
+      if (!fullText.trim()) return;
+
+      // Determine if this is from the agent or user based on participant
+      const isAgent = participant?.identity?.includes('agent') ||
+                      !participant?.identity?.startsWith('user-');
+      const role: 'user' | 'agent' = isAgent ? 'agent' : 'user';
+
+      // Use segment ID or generate one
+      const segmentId = segments[0]?.id || `trans-${Date.now()}`;
+      const isFinal = segments[segments.length - 1]?.final ?? true;
+
+      console.log(`[TRANSCRIPTION] ${role} (final=${isFinal}): ${fullText.substring(0, 50)}...`);
+
+      const message: TranscriptMessage = {
+        id: segmentId,
+        role,
+        text: fullText,
+        timestamp: Date.now(),
+      };
+
+      // Add or update message
+      setMessages((prev) => {
+        // Update existing message with same ID (for interim -> final)
+        const existingIdx = prev.findIndex((m) => m.id === message.id);
+        if (existingIdx >= 0) {
+          const updated = [...prev];
+          updated[existingIdx] = message;
+          return updated;
+        }
+        return [...prev, message].sort((a, b) => a.timestamp - b.timestamp);
+      });
+    };
+
     room.on(RoomEvent.Disconnected, handleDisconnected);
     room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
     room.on(RoomEvent.ParticipantAttributesChanged, handleAttributesChanged);
     room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
     room.on(RoomEvent.TrackPublished, handleTrackPublished);
+    room.on(RoomEvent.DataReceived, handleDataReceived);
+    room.on(RoomEvent.TranscriptionReceived, handleTranscriptionReceived);
 
     // Log current state and check for existing agent
     console.log(`[ROOM] Current participants: ${room.remoteParticipants.size}`);
@@ -225,8 +333,10 @@ function RoomContent({
       room.off(RoomEvent.ParticipantAttributesChanged, handleAttributesChanged);
       room.off(RoomEvent.TrackSubscribed, handleTrackSubscribed);
       room.off(RoomEvent.TrackPublished, handleTrackPublished);
+      room.off(RoomEvent.DataReceived, handleDataReceived);
+      room.off(RoomEvent.TranscriptionReceived, handleTranscriptionReceived);
     };
-  }, [room, setState, setAgentState]);
+  }, [room, setState, setAgentState, setMessages, setAttachments, currentBatchIdRef]);
 
   // Render iOS audio manager when room is connected
   if (room && room.state === ConnectionState.Connected) {
@@ -244,34 +354,45 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
+  const [selectedAttachment, setSelectedAttachment] = useState<AttachmentInfo | null>(null);
+  const currentBatchIdRef = useRef<string | null>(null);
 
-  const [captionText, setCaptionText] = useState("Hello, I'm Vera.\nTap the ear to talk to me.");
+  // Animation values for orb
+  const orbScale = useRef(new Animated.Value(1.3)).current; // Start larger when idle
+  const orbBottom = useRef(new Animated.Value(30)).current; // Start higher when idle
 
   // Log state changes
   useEffect(() => {
     console.log(`[STATE] -> ${state}`);
   }, [state]);
 
-  // Update caption based on state
+  // Animate orb based on state
   useEffect(() => {
-    if (error) {
-      setCaptionText(`Error: ${error}`);
-    } else {
-      switch (state) {
-        case 'connecting':
-          setCaptionText("Connecting...");
-          break;
-        case 'speaking':
-          setCaptionText("Vera is speaking...");
-          break;
-        case 'listening':
-          setCaptionText("I'm listening...\nSpeak now.");
-          break;
-        default:
-          setCaptionText("Hello, I'm Vera.\nTap the ear to connect.");
-      }
+    const isActive = state === 'listening' || state === 'speaking';
+    Animated.parallel([
+      Animated.spring(orbScale, {
+        toValue: isActive ? 1.0 : 1.3,
+        useNativeDriver: true,
+        friction: 8,
+      }),
+      Animated.spring(orbBottom, {
+        toValue: isActive ? 0 : 30,
+        useNativeDriver: false, // Can't use native driver for layout props
+        friction: 8,
+      }),
+    ]).start();
+  }, [state, orbScale, orbBottom]);
+
+  // Clear messages and attachments when token becomes null (disconnect)
+  useEffect(() => {
+    if (!token) {
+      setMessages([]);
+      setAttachments([]);
+      currentBatchIdRef.current = null;
     }
-  }, [state, error]);
+  }, [token]);
 
   const handleConnect = useCallback(async () => {
     if (isConnecting) return;
@@ -324,6 +445,9 @@ export default function HomeScreen() {
   const handleDisconnect = useCallback(async () => {
     setToken(null);
     setState('idle');
+    setMessages([]);
+    setAttachments([]);
+    currentBatchIdRef.current = null;
     await AudioSession.stopAudioSession();
   }, []);
 
@@ -342,49 +466,70 @@ export default function HomeScreen() {
           <RoomContent
             state={state}
             setState={setState}
+            setMessages={setMessages}
+            setAttachments={setAttachments}
+            currentBatchIdRef={currentBatchIdRef}
           />
         </LiveKitRoom>
       )}
 
-      {/* Hamburger Menu */}
-      <TouchableOpacity
-        style={styles.menuButton}
-        onPress={() => router.push('/admin')}
-      >
-        <Ionicons name="menu" size={28} color="rgba(51, 51, 64, 0.4)" />
-      </TouchableOpacity>
+      {/* Header Bar */}
+      <View style={styles.headerBar}>
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={() => router.push('/admin')}
+        >
+          <Ionicons name="menu" size={28} color="rgba(51, 51, 64, 0.4)" />
+        </TouchableOpacity>
 
-      {/* Status indicator */}
-      <View style={styles.statusContainer}>
-        <View style={[
-          styles.statusDot,
-          { backgroundColor: state !== 'idle' ? '#4DC073' : '#808080' }
-        ]} />
-        <Text style={styles.statusText}>
-          {state !== 'idle' ? 'Connected' : 'Disconnected'}
-        </Text>
+        {/* Status indicator */}
+        <View style={styles.statusContainer}>
+          <View style={[
+            styles.statusDot,
+            { backgroundColor: error ? '#E65C5C' : (state !== 'idle' ? '#4DC073' : '#808080') }
+          ]} />
+          <Text style={styles.statusText}>
+            {error ? error : (state === 'connecting' ? 'Connecting...' : (state !== 'idle' ? 'Connected' : 'Disconnected'))}
+          </Text>
+        </View>
       </View>
 
-      {/* Caption Area */}
-      <ScrollView
-        style={styles.captionArea}
-        contentContainerStyle={styles.captionContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.captionText}>{captionText}</Text>
-      </ScrollView>
-
-      {/* VAD Orb */}
-      <View style={[styles.orbContainer, { bottom: insets.bottom + 50 }]}>
-        <VADOrb
-          isListening={state === 'listening'}
-          isVADActive={audioLevel > 0.2}
-          isSpeaking={state === 'speaking'}
-          isProcessing={state === 'connecting'}
-          audioLevel={audioLevel}
-          onPress={handleOrbTap}
+      {/* Message List - stops above orb footer */}
+      <View style={[styles.messageArea, { marginBottom: 100 + insets.bottom }]}>
+        <MessageList
+          messages={messages}
+          attachments={attachments}
+          onAttachmentSelect={setSelectedAttachment}
         />
       </View>
+
+      {/* VAD Orb - fixed at bottom with footer background, animates based on state */}
+      <Animated.View style={[
+        styles.orbContainer,
+        {
+          paddingBottom: insets.bottom + 12,
+          bottom: orbBottom,
+        }
+      ]}>
+        <Animated.View style={{ transform: [{ scale: orbScale }] }}>
+          <VADOrb
+            isListening={state === 'listening'}
+            isVADActive={audioLevel > 0.2}
+            isSpeaking={state === 'speaking'}
+            isProcessing={state === 'connecting'}
+            audioLevel={audioLevel}
+            onPress={handleOrbTap}
+          />
+        </Animated.View>
+      </Animated.View>
+
+      {/* Attachment Viewer Modal */}
+      {selectedAttachment && (
+        <AttachmentViewer
+          attachment={selectedAttachment}
+          onClose={() => setSelectedAttachment(null)}
+        />
+      )}
     </View>
   );
 }
@@ -394,23 +539,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FAF5EB',
   },
+  headerBar: {
+    backgroundColor: '#F5F0E6',
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   menuButton: {
-    position: 'absolute',
-    top: 60,
-    left: 16,
-    width: 50,
-    height: 50,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 10,
   },
   statusContainer: {
-    position: 'absolute',
-    top: 68,
-    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    zIndex: 10,
   },
   statusDot: {
     width: 8,
@@ -422,23 +568,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(51, 51, 64, 0.6)',
   },
-  captionArea: {
-    marginTop: 100,
+  messageArea: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 16,
-  },
-  captionContent: {
-    paddingBottom: 160,
-  },
-  captionText: {
-    fontSize: 48,
-    fontWeight: '800',
-    color: '#333340',
-    lineHeight: 56,
   },
   orbContainer: {
     position: 'absolute',
-    right: 24,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    backgroundColor: '#F5F0E6',
+    paddingTop: 8,
   },
 });
