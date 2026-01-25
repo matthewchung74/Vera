@@ -68,6 +68,7 @@ Your capabilities:
 - Provide companionship
 - Help with general tasks
 - Search and read the user's emails using the tools provided
+- Compose and send new emails using compose_email tool
 - Reply to emails using reply_to_email tool
 - Forward emails using forward_email tool
 - Mark emails as spam using mark_email_spam tool
@@ -93,10 +94,17 @@ When discussing emails:
 - When the user asks to read a specific email, use the Email ID from the tool results to call get_email_details
 
 SENDING GUARDRAILS (critical):
-- When replying or forwarding: ALWAYS read the draft back to the user
+- When composing, replying or forwarding: ALWAYS read the draft back to the user
 - Ask "Send it?" and wait for explicit confirmation ("yes", "send it", "go ahead")
 - If user says "no", "change", or "cancel" - stop and ask what they want instead
 - NEVER send without explicit user confirmation
+
+COMPOSE RULES:
+- When user says "send an email to X" or "write an email to X", use compose_email tool
+- No attachments supported for new emails - say "I can't attach files to new emails yet" if asked
+- Empty subject: ask "You didn't give me a subject. Send anyway?"
+- Empty message: ask "The message is empty. Send anyway?"
+- Always confirm recipient, subject, and message preview before sending
 
 REPLY RULES:
 - Replies do NOT include attachments unless user explicitly says "include the attachments"
@@ -921,6 +929,72 @@ class VeraAgent(Agent):
 
         return "I couldn't find that email to forward."
 
+    @function_tool()
+    async def compose_email(
+        self,
+        context: RunContext,
+        recipient: str,
+        subject: str,
+        message: str,
+        confirmed: bool = False,
+    ) -> str:
+        """Compose and send a new email (not a reply or forward).
+        Will ask for confirmation before sending.
+
+        Args:
+            recipient: Name or email of the person to send to (e.g., "Sarah" or "sarah@gmail.com")
+            subject: Email subject line
+            message: The email body content
+            confirmed: Set to True only after user explicitly confirms sending
+        """
+        logger.info(f"[TOOL] compose_email called: recipient='{recipient}', subject='{subject}', confirmed={confirmed}")
+
+        # Resolve recipient
+        recipient_email = recipient
+        if '@' not in recipient:
+            resolved = self._resolve_contact(recipient)
+            if resolved is None:
+                return f"I don't have {recipient}'s email. What is it?"
+            if resolved.startswith('AMBIGUOUS:'):
+                names = resolved.replace('AMBIGUOUS:', '').split(',')
+                formatted_names = [n.title() for n in names]
+                return f"Which one? {' or '.join(formatted_names)}?"
+            recipient_email = resolved
+
+        # Validate subject and message
+        if not subject.strip() and not confirmed:
+            return "You didn't give me a subject. Send anyway?"
+
+        if not message.strip() and not confirmed:
+            return "The message is empty. Send anyway?"
+
+        # If not confirmed, show draft and ask for confirmation
+        if not confirmed:
+            preview = message[:50] + "..." if len(message) > 50 else message
+            return f"I'll send to {recipient_email}.\nSubject: {subject}\nMessage: \"{preview}\"\n\nSend it?"
+
+        # Determine which email service to use (prefer Gmail if both available)
+        if self.gmail_token:
+            success, reason = await self._gmail_send(recipient_email, subject, message)
+            if success:
+                return "Sent!"
+            elif reason == "auth_expired":
+                return "I couldn't send the email. Your Gmail connection has expired. Please reconnect in the app settings."
+            else:
+                return "I couldn't send the email. Please try again."
+
+        elif self.outlook_token:
+            success, reason = await self._outlook_send(recipient_email, subject, message)
+            if success:
+                return "Sent!"
+            elif reason == "auth_expired":
+                return "I couldn't send the email. Your Outlook connection has expired. Please reconnect in the app settings."
+            else:
+                return "I couldn't send the email. Please try again."
+
+        else:
+            return "No email accounts are connected. Please connect Gmail or Outlook in the app settings."
+
     # ==================== Gmail API Methods ====================
 
     async def _search_gmail(self, query: str, days_back: int) -> tuple:
@@ -1491,6 +1565,45 @@ class VeraAgent(Agent):
                     return (True, "ok")
                 return (False, "send_failed")
 
+    async def _gmail_send(self, recipient: str, subject: str, body: str) -> tuple[bool, str]:
+        """Send a new email via Gmail API.
+
+        Args:
+            recipient: Email address to send to
+            subject: Email subject
+            body: Email body content
+
+        Returns:
+            Tuple of (success: bool, reason: str) where reason is one of:
+            - "ok": Sent successfully
+            - "auth_expired": 401 error
+            - "send_failed": Other error
+        """
+        async with aiohttp.ClientSession() as session:
+            # Create MIME message
+            mime_msg = MIMEText(body, "plain", "utf-8")
+            mime_msg["To"] = recipient
+            mime_msg["Subject"] = subject
+
+            # Encode to base64url
+            raw = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
+
+            send_url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+            send_data = {"raw": raw}
+
+            async with session.post(send_url, headers={
+                "Authorization": f"Bearer {self.gmail_token}",
+                "Content-Type": "application/json",
+            }, json=send_data) as resp:
+                if resp.status == 401:
+                    logger.error("Gmail send failed: 401 Unauthorized")
+                    return (False, "auth_expired")
+                if resp.status == 200:
+                    logger.info(f"Gmail email sent successfully to {recipient}")
+                    return (True, "ok")
+                logger.error(f"Gmail send failed with status: {resp.status}")
+                return (False, "send_failed")
+
     # ==================== Outlook API Methods ====================
 
     async def _search_outlook(self, query: str, days_back: int) -> tuple:
@@ -1733,6 +1846,50 @@ class VeraAgent(Agent):
                     logger.error("Outlook forward failed: 401 Unauthorized")
                     return False
                 return resp.status in (200, 202)
+
+    async def _outlook_send(self, recipient: str, subject: str, body: str) -> tuple[bool, str]:
+        """Send a new email via Microsoft Graph API.
+
+        Args:
+            recipient: Email address to send to
+            subject: Email subject
+            body: Email body content
+
+        Returns:
+            Tuple of (success: bool, reason: str) where reason is one of:
+            - "ok": Sent successfully
+            - "auth_expired": 401 error
+            - "send_failed": Other error
+        """
+        async with aiohttp.ClientSession() as session:
+            url = "https://graph.microsoft.com/v1.0/me/sendMail"
+            headers = {
+                "Authorization": f"Bearer {self.outlook_token}",
+                "Content-Type": "application/json",
+            }
+            data = {
+                "message": {
+                    "subject": subject,
+                    "body": {
+                        "contentType": "Text",
+                        "content": body,
+                    },
+                    "toRecipients": [
+                        {"emailAddress": {"address": recipient}}
+                    ],
+                },
+                "saveToSentItems": True,
+            }
+
+            async with session.post(url, headers=headers, json=data) as resp:
+                if resp.status == 401:
+                    logger.error("Outlook send failed: 401 Unauthorized")
+                    return (False, "auth_expired")
+                if resp.status in (200, 202):
+                    logger.info(f"Outlook email sent successfully to {recipient}")
+                    return (True, "ok")
+                logger.error(f"Outlook send failed with status: {resp.status}")
+                return (False, "send_failed")
 
 
 async def wait_for_tokens(room, timeout=10.0) -> dict:

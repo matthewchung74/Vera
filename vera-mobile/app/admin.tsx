@@ -7,6 +7,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -24,6 +27,8 @@ import {
   fetchOutlookEmails,
   EmailItem,
 } from '../src/services/emailService';
+import * as base64 from 'base-64';
+import * as utf8 from 'utf8';
 
 // Email with importance analysis
 interface AnalyzedEmail extends EmailItem {
@@ -106,9 +111,158 @@ export default function AdminScreen() {
   const [isFetching, setIsFetching] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Compose email state
+  const [emailTo, setEmailTo] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
   useEffect(() => {
     loadConnectionStatus();
   }, []);
+
+  const handleSendEmail = async () => {
+    if (!emailTo.trim()) {
+      Alert.alert('Error', 'Please enter a recipient email address.');
+      return;
+    }
+    if (!emailTo.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email address.');
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      // Try Gmail first, then Outlook
+      let token = await getGmailToken();
+      let useGmail = !!token;
+
+      if (!token) {
+        token = await getOutlookToken();
+      }
+
+      if (!token) {
+        Alert.alert('Error', 'No email account connected.');
+        setIsSending(false);
+        return;
+      }
+
+      if (useGmail) {
+        // Send via Gmail API
+        const message = [
+          `To: ${emailTo}`,
+          `Subject: ${emailSubject || '(No subject)'}`,
+          'Content-Type: text/plain; charset=utf-8',
+          '',
+          emailBody,
+        ].join('\r\n');
+
+        // Base64url encode (React Native compatible)
+        const base64Encoded = base64.encode(utf8.encode(message))
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
+
+        const response = await fetch(
+          'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ raw: base64Encoded }),
+          }
+        );
+
+        if (response.status === 401) {
+          Alert.alert('Session Expired', 'Please reconnect Gmail.');
+          await disconnectGmail();
+          setGmailConnected(false);
+          setIsSending(false);
+          return;
+        }
+
+        if (!response.ok) {
+          const error = await response.json();
+          const errorMsg = error.error?.message || 'Failed to send';
+          if (errorMsg.includes('insufficient') || errorMsg.includes('scope')) {
+            Alert.alert(
+              'Permission Missing',
+              'Gmail send permission not granted. Please disconnect Gmail and reconnect, making sure to check ALL permission boxes.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Reconnect Gmail',
+                  onPress: async () => {
+                    await disconnectGmail();
+                    setGmailConnected(false);
+                    handleConnectGmail();
+                  }
+                },
+              ]
+            );
+            setIsSending(false);
+            return;
+          }
+          throw new Error(errorMsg);
+        }
+
+        Alert.alert('Sent!', `Email sent to ${emailTo}`);
+        setEmailTo('');
+        setEmailSubject('');
+        setEmailBody('');
+      } else {
+        // Send via Outlook/Microsoft Graph API
+        const response = await fetch(
+          'https://graph.microsoft.com/v1.0/me/sendMail',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              message: {
+                subject: emailSubject || '(No subject)',
+                body: {
+                  contentType: 'Text',
+                  content: emailBody,
+                },
+                toRecipients: [
+                  { emailAddress: { address: emailTo } },
+                ],
+              },
+              saveToSentItems: true,
+            }),
+          }
+        );
+
+        if (response.status === 401) {
+          Alert.alert('Session Expired', 'Please reconnect Outlook.');
+          await disconnectOutlook();
+          setOutlookConnected(false);
+          setIsSending(false);
+          return;
+        }
+
+        if (!response.ok && response.status !== 202) {
+          const error = await response.json();
+          throw new Error(error.error?.message || 'Failed to send');
+        }
+
+        Alert.alert('Sent!', `Email sent to ${emailTo}`);
+        setEmailTo('');
+        setEmailSubject('');
+        setEmailBody('');
+      }
+    } catch (err: any) {
+      console.error('Send email error:', err);
+      Alert.alert('Error', err.message || 'Failed to send email.');
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   const handleFetchEmails = async () => {
     setIsFetching(true);
@@ -272,6 +426,9 @@ export default function AdminScreen() {
             </TouchableOpacity>
           )}
         </View>
+        {!gmailConnected && (
+          <Text style={styles.scopeHint}>Check ALL permission boxes when connecting</Text>
+        )}
 
         {/* Outlook */}
         <View style={styles.row}>
@@ -300,6 +457,65 @@ export default function AdminScreen() {
           </View>
         )}
       </View>
+
+      {/* Compose Email Section */}
+      {(gmailConnected || outlookConnected) && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Send Email</Text>
+
+          <TextInput
+            style={styles.textInput}
+            placeholder="To: email@example.com"
+            placeholderTextColor="#999"
+            value={emailTo}
+            onChangeText={setEmailTo}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <TextInput
+            style={styles.textInput}
+            placeholder="Subject"
+            placeholderTextColor="#999"
+            value={emailSubject}
+            onChangeText={setEmailSubject}
+          />
+
+          <TextInput
+            style={[styles.textInput, styles.textArea]}
+            placeholder="Message..."
+            placeholderTextColor="#999"
+            value={emailBody}
+            onChangeText={setEmailBody}
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
+
+          <TouchableOpacity
+            style={[styles.sendButton, (!emailTo.trim() || isSending) && styles.sendButtonDisabled]}
+            onPress={handleSendEmail}
+            disabled={!emailTo.trim() || isSending}
+          >
+            {isSending ? (
+              <>
+                <ActivityIndicator size="small" color="white" />
+                <Text style={styles.sendButtonText}>Sending...</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="send" size={18} color="white" />
+                <Text style={styles.sendButtonText}>Send Email</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <Text style={styles.sendHint}>
+            Will send via {gmailConnected ? 'Gmail' : 'Outlook'}
+          </Text>
+        </View>
+      )}
 
       {/* Fetch Emails Section */}
       {(gmailConnected || outlookConnected) && (
@@ -374,13 +590,6 @@ export default function AdminScreen() {
         </View>
       )}
 
-      {/* About Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>About</Text>
-        <Text style={styles.aboutText}>Version 1.0.0 (React Native)</Text>
-        <Text style={styles.aboutText}>For Caregivers Only</Text>
-      </View>
-
       <View style={{ height: 50 }} />
     </ScrollView>
   );
@@ -445,11 +654,6 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 14,
     color: '#666',
-  },
-  aboutText: {
-    fontSize: 14,
-    color: '#666',
-    paddingVertical: 4,
   },
   fetchButton: {
     flexDirection: 'row',
@@ -530,5 +734,52 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#888',
     lineHeight: 18,
+  },
+  textInput: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  textArea: {
+    minHeight: 100,
+    paddingTop: 10,
+  },
+  sendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#34A853',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+    marginTop: 4,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#A5D6A7',
+  },
+  sendButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sendHint: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  scopeHint: {
+    fontSize: 11,
+    color: '#FF9500',
+    marginTop: -8,
+    marginBottom: 8,
+    marginLeft: 36,
   },
 });

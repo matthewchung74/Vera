@@ -273,6 +273,9 @@ function RoomContent({
       const fullText = segments.map((s: any) => s.text).join(' ');
       if (!fullText.trim()) return;
 
+      // Check if this is a final transcription
+      const isFinal = segments[segments.length - 1]?.final ?? true;
+
       // Determine if this is from the agent or user based on participant
       const isAgent = participant?.identity?.includes('agent') ||
                       !participant?.identity?.startsWith('user-');
@@ -280,27 +283,67 @@ function RoomContent({
 
       // Use segment ID or generate one
       const segmentId = segments[0]?.id || `trans-${Date.now()}`;
-      const isFinal = segments[segments.length - 1]?.final ?? true;
 
       console.log(`[TRANSCRIPTION] ${role} (final=${isFinal}): ${fullText.substring(0, 50)}...`);
 
-      const message: TranscriptMessage = {
-        id: segmentId,
-        role,
-        text: fullText,
-        timestamp: Date.now(),
-      };
+      // For user messages: skip interim to avoid clutter, only show final
+      // For agent messages: show all (including interim) for real-time streaming effect
+      if (!isFinal && role === 'user') {
+        return;
+      }
 
-      // Add or update message
+      const now = Date.now();
+
       setMessages((prev) => {
-        // Update existing message with same ID (for interim -> final)
-        const existingIdx = prev.findIndex((m) => m.id === message.id);
+        // For agent interim messages, update existing or add new
+        if (!isFinal && role === 'agent') {
+          const existingIdx = prev.findIndex((m) => m.id === segmentId);
+          if (existingIdx >= 0) {
+            const updated = [...prev];
+            updated[existingIdx] = { ...updated[existingIdx], text: fullText };
+            return updated;
+          }
+          return [...prev, { id: segmentId, role, text: fullText, timestamp: now }];
+        }
+
+        // For final USER messages: merge with recent message if within 5 seconds
+        // This prevents speech pauses from creating multiple bubbles
+        if (role === 'user') {
+          let recentIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'user' && (now - prev[i].timestamp) < 5000) {
+              recentIdx = i;
+              break;
+            }
+          }
+
+          if (recentIdx >= 0) {
+            const updated = [...prev];
+            const existing = updated[recentIdx];
+            // Don't duplicate if text is already contained
+            if (!existing.text.includes(fullText) && !fullText.includes(existing.text)) {
+              updated[recentIdx] = {
+                ...existing,
+                text: existing.text + ' ' + fullText,
+                timestamp: now,
+              };
+              return updated;
+            }
+            // If duplicate, just update timestamp
+            updated[recentIdx] = { ...existing, timestamp: now };
+            return updated;
+          }
+        }
+
+        // Check for duplicate by segment ID
+        const existingIdx = prev.findIndex((m) => m.id === segmentId);
         if (existingIdx >= 0) {
           const updated = [...prev];
-          updated[existingIdx] = message;
+          updated[existingIdx] = { id: segmentId, role, text: fullText, timestamp: now };
           return updated;
         }
-        return [...prev, message].sort((a, b) => a.timestamp - b.timestamp);
+
+        return [...prev, { id: segmentId, role, text: fullText, timestamp: now }];
       });
     };
 

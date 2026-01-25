@@ -20,6 +20,7 @@
     "@livekit/react-native-expo-plugin": "^1.0.1",
     "@livekit/react-native-webrtc": "^137.0.1",
     "axios": "^1.6.0",
+    "base-64": "^1.0.0",
     "expo": "~53.0.0",
     "expo-asset": "~11.1.0",
     "expo-auth-session": "~6.2.1",
@@ -43,6 +44,7 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.0",
     "react-native-url-polyfill": "^3.0.0",
+    "utf8": "^3.0.0",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
