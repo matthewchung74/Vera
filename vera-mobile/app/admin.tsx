@@ -131,6 +131,16 @@ export default function AdminScreen() {
       return;
     }
 
+    // Auto-generate subject from message if empty
+    let finalSubject = emailSubject.trim();
+    if (!finalSubject && emailBody.trim()) {
+      // Take first sentence or first ~50 chars
+      const firstSentence = emailBody.split(/[.!?]/)[0].trim();
+      finalSubject = firstSentence.length > 50
+        ? firstSentence.substring(0, 47) + '...'
+        : firstSentence;
+    }
+
     setIsSending(true);
     try {
       // Try Gmail first, then Outlook
@@ -151,7 +161,7 @@ export default function AdminScreen() {
         // Send via Gmail API
         const message = [
           `To: ${emailTo}`,
-          `Subject: ${emailSubject || '(No subject)'}`,
+          `Subject: ${finalSubject || '(No subject)'}`,
           'Content-Type: text/plain; charset=utf-8',
           '',
           emailBody,
@@ -224,7 +234,7 @@ export default function AdminScreen() {
             },
             body: JSON.stringify({
               message: {
-                subject: emailSubject || '(No subject)',
+                subject: finalSubject || '(No subject)',
                 body: {
                   contentType: 'Text',
                   content: emailBody,
@@ -476,7 +486,7 @@ export default function AdminScreen() {
 
           <TextInput
             style={styles.textInput}
-            placeholder="Subject"
+            placeholder="Subject (optional - auto-generated from message)"
             placeholderTextColor="#999"
             value={emailSubject}
             onChangeText={setEmailSubject}
