@@ -5,7 +5,9 @@ port: 7880
 rtc:
   port_range_start: 50000
   port_range_end: 50100
-  use_external_ip: false
+  use_external_ip: true
+  # OVHcloud VPS public IP
+  node_ip: 144.217.241.152
 
 # Logging
 logging:

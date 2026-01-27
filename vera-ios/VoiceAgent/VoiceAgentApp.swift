@@ -4,9 +4,9 @@ import SwiftUI
 
 @main
 struct VeraApp: App {
-    // Connect to local LiveKit server via token server
-    // Update this URL when deploying to production
-    private static let tokenServerURL = URL(string: "http://localhost:8080/token")!
+    // Connect to LiveKit server via token server
+    // OVHcloud VPS: 144.217.241.152
+    private static let tokenServerURL = URL(string: "http://144.217.241.152:7890/token")!
 
     // Shared room instance for attachment manager to listen to data channel
     private let room: Room

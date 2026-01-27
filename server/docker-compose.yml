@@ -45,6 +45,7 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=http://livekit-server:7880
+      - LIVEKIT_WS_URL=ws://144.217.241.152:7880
     restart: unless-stopped
 
   # Redis - optional, for agent job distribution at scale
