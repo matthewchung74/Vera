@@ -308,6 +308,46 @@ class VeraAgent(Agent):
 
         return None
 
+    async def _search_for_contact(self, name: str) -> Optional[str]:
+        """Search past emails to find someone's email address.
+        Returns email if found, None otherwise."""
+        logger.info(f"[CONTACTS] Searching for contact: {name}")
+
+        # Search for emails from this person
+        search_query = f"from:{name}"
+        results = []
+
+        # Try Gmail
+        if self.gmail_token:
+            try:
+                gmail_results, _ = await self._search_gmail(search_query, days_back=365)
+                results.extend(gmail_results)
+            except Exception as e:
+                logger.error(f"[CONTACTS] Gmail search failed: {e}")
+
+        # Try Outlook
+        if self.outlook_token:
+            try:
+                outlook_results, _ = await self._search_outlook(name, days_back=365)
+                results.extend(outlook_results)
+            except Exception as e:
+                logger.error(f"[CONTACTS] Outlook search failed: {e}")
+
+        # Check if we learned the contact from the search results
+        normalized = self._normalize_name(name)
+        if normalized in self._contacts:
+            logger.info(f"[CONTACTS] Found {name} -> {self._contacts[normalized]}")
+            return self._contacts[normalized]
+
+        # Also check first name
+        first_name = normalized.split()[0] if ' ' in normalized else normalized
+        if first_name in self._contacts:
+            logger.info(f"[CONTACTS] Found {name} via first name -> {self._contacts[first_name]}")
+            return self._contacts[first_name]
+
+        logger.info(f"[CONTACTS] Could not find contact: {name}")
+        return None
+
     def _is_cache_expired(self) -> bool:
         """Check if email cache has expired."""
         if not self._cache_timestamp:
@@ -885,7 +925,13 @@ class VeraAgent(Agent):
         if '@' not in recipient:
             resolved = self._resolve_contact(recipient)
             if resolved is None:
-                return f"I don't have {recipient}'s email. What is it?"
+                # Try searching past emails for this contact
+                logger.info(f"[TOOL] Contact not found, searching emails for: {recipient}")
+                searched_email = await self._search_for_contact(recipient)
+                if searched_email:
+                    resolved = searched_email
+                else:
+                    return f"I couldn't find {recipient}'s email in your past messages. What is their email address?"
             if resolved.startswith('AMBIGUOUS:'):
                 names = resolved.replace('AMBIGUOUS:', '').split(',')
                 formatted_names = [n.title() for n in names]
@@ -989,7 +1035,13 @@ class VeraAgent(Agent):
         if '@' not in recipient:
             resolved = self._resolve_contact(recipient)
             if resolved is None:
-                return f"I don't have {recipient}'s email. What is it?"
+                # Try searching past emails for this contact
+                logger.info(f"[TOOL] Contact not found, searching emails for: {recipient}")
+                searched_email = await self._search_for_contact(recipient)
+                if searched_email:
+                    resolved = searched_email
+                else:
+                    return f"I couldn't find {recipient}'s email in your past messages. What is their email address?"
             if resolved.startswith('AMBIGUOUS:'):
                 names = resolved.replace('AMBIGUOUS:', '').split(',')
                 formatted_names = [n.title() for n in names]
