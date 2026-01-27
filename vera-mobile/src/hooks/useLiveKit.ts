@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AudioSession } from '@livekit/react-native';
 
-// Server config - localhost works for simulator, use your Mac's IP for physical device
-const TOKEN_SERVER_URL = 'http://localhost:7890';
-const LIVEKIT_URL = 'ws://localhost:7880';
+// Server config - OVHcloud VPS
+const TOKEN_SERVER_URL = 'http://144.217.241.152:7890';
+const LIVEKIT_URL = 'ws://144.217.241.152:7880';
 
 // Lazy-loaded LiveKit types
 type LiveKitRoom = any;

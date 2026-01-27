@@ -33,7 +33,11 @@
               "com.googleusercontent.apps.41951949194-d26a09o7dh81p9ftsj0gl69p7uka16vm"
             ]
           }
-        ]
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        }
       },
       "bitcode": false,
       "appleTeamId": "BYNLJDPW52"

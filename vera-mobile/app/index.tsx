@@ -26,9 +26,9 @@ import { AttachmentInfo } from '../src/components/AttachmentIndicator';
 import { AttachmentViewer } from '../src/components/AttachmentViewer';
 import { getGmailToken, getOutlookToken } from '../src/services/authService';
 
-// Server config - use localhost for simulator, your Mac's IP for physical device
-const TOKEN_SERVER_URL = 'http://localhost:7890';
-const LIVEKIT_URL = 'ws://localhost:7880';
+// Server config - OVHcloud VPS with Caddy HTTPS
+const TOKEN_SERVER_URL = 'https://vps-d0703279.vps.ovh.ca';
+const LIVEKIT_URL = 'wss://vps-d0703279.vps.ovh.ca:7443';
 
 // Simple state machine
 type AppState = 'idle' | 'connecting' | 'speaking' | 'listening';
@@ -464,11 +464,13 @@ export default function HomeScreen() {
       console.log('[AUDIO] Audio session started with playAndRecord category');
 
       // Fetch token from server
-      const response = await fetch(
-        `${TOKEN_SERVER_URL}/token?room=vera-room&identity=user-${Date.now()}`
-      );
+      const tokenUrl = `${TOKEN_SERVER_URL}/token?room=vera-room&identity=user-${Date.now()}`;
+      console.log('[FETCH] Attempting to fetch:', tokenUrl);
+      const response = await fetch(tokenUrl);
+      console.log('[FETCH] Response status:', response.status);
       if (!response.ok) throw new Error('Failed to get token');
       const data = await response.json();
+      console.log('[FETCH] Got token successfully');
 
       setToken(data.token);
     } catch (err) {
