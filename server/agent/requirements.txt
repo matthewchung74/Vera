@@ -6,3 +6,6 @@ livekit-plugins-silero>=1.0.0
 
 # Utilities
 python-dotenv>=1.0.0
+
+# PDF text extraction for email attachments
+pdfplumber>=0.10.0

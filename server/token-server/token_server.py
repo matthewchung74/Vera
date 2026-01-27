@@ -1,11 +1,10 @@
 """
 Simple token server for LiveKit authentication.
 Generates JWT tokens for clients to connect to LiveKit rooms.
-Also dispatches agents when users join.
+Note: Agents auto-dispatch via LiveKit framework when users join.
 """
 
 import os
-import asyncio
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from livekit import api
@@ -51,7 +50,7 @@ async def get_token(
 
     jwt_token = token.to_jwt()
 
-    # Note: Agent auto-joins via WorkerOptions, no need for explicit dispatch
+    # No manual dispatch needed - LiveKit agents auto-dispatch when users join
 
     return {
         "token": jwt_token,
@@ -65,7 +64,22 @@ async def dispatch_agent(room: str):
     """Dispatch an agent to the specified room."""
     try:
         lk_api = api.LiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        # Use CreateAgentDispatchRequest (not AgentDispatchRequest)
+
+        # Also check if room already has an agent
+        try:
+            rooms = await lk_api.room.list_rooms(api.ListRoomsRequest(names=[room]))
+            if rooms.rooms:
+                participants = await lk_api.room.list_participants(
+                    api.ListParticipantsRequest(room=room)
+                )
+                for p in participants.participants:
+                    if 'agent' in p.identity.lower() or p.kind == 1:
+                        print(f"Agent already in room {room}, skipping dispatch")
+                        await lk_api.aclose()
+                        return
+        except Exception:
+            pass
+
         dispatch = api.CreateAgentDispatchRequest(room=room)
         await lk_api.agent_dispatch.create_dispatch(dispatch)
         print(f"Agent dispatched to room: {room}")

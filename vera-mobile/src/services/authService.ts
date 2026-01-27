@@ -16,7 +16,11 @@ const OUTLOOK_EXPIRY_KEY = 'vera_outlook_expiry';
 // OAuth Configuration
 // Gmail (Google Cloud Console)
 const GMAIL_CLIENT_ID = '41951949194-d26a09o7dh81p9ftsj0gl69p7uka16vm.apps.googleusercontent.com';
-const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
+const GMAIL_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.modify',
+];
 
 // Outlook (Azure)
 const OUTLOOK_CLIENT_ID = 'c8ba6d40-973c-455b-8a4b-1e2650136f14';
