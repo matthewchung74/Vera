@@ -151,6 +151,41 @@ class VeraAgent(Agent):
         self._room = room
         self._published_texts = set()  # Track published transcripts to avoid dupes
 
+    def _learn_contact_from_email(self, from_field: str) -> None:
+        """Auto-learn contact from email 'From' field like 'Karen Smith <karen@gmail.com>'."""
+        if not from_field:
+            return
+
+        import re
+        # Parse "Name <email>" or just "email"
+        match = re.match(r'^([^<]+?)\s*<([^>]+)>$', from_field.strip())
+        if match:
+            name = match.group(1).strip().strip('"\'')
+            email = match.group(2).strip().lower()
+        else:
+            # Just an email address
+            email = from_field.strip().lower()
+            # Extract name from email (before @)
+            name = email.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+
+        if not name or not email:
+            return
+
+        # Normalize name for lookup
+        normalized = self._normalize_name(name)
+
+        # Also store first name only for easier lookup
+        first_name = normalized.split()[0] if ' ' in normalized else normalized
+
+        # Don't overwrite existing contacts
+        if normalized not in self._contacts:
+            self._contacts[normalized] = email
+            logger.info(f"[CONTACTS] Auto-learned: {normalized} -> {email}")
+
+        if first_name != normalized and first_name not in self._contacts:
+            self._contacts[first_name] = email
+            logger.info(f"[CONTACTS] Auto-learned (first name): {first_name} -> {email}")
+
     async def _publish_transcript(self, transcript_type: str, text: str) -> None:
         """Publish transcript message to clients via data channel."""
         if not self._room or not self._room.local_participant:
@@ -1051,6 +1086,7 @@ class VeraAgent(Agent):
         for h in headers_list:
             if h["name"] == "From":
                 email["from"] = h["value"]
+                self._learn_contact_from_email(h["value"])  # Auto-learn contact
             elif h["name"] == "Subject":
                 email["subject"] = h["value"]
             elif h["name"] == "Date":
@@ -1076,6 +1112,7 @@ class VeraAgent(Agent):
         for h in headers_list:
             if h["name"] == "From":
                 email["from"] = h["value"]
+                self._learn_contact_from_email(h["value"])  # Auto-learn contact
             elif h["name"] == "Subject":
                 email["subject"] = h["value"]
             elif h["name"] == "Date":
@@ -1631,9 +1668,15 @@ class VeraAgent(Agent):
 
             results = []
             for msg in data.get("value", []):
+                from_obj = msg.get("from", {}).get("emailAddress", {})
+                from_name = from_obj.get("name", "")
+                from_addr = from_obj.get("address", "Unknown")
+                # Format as "Name <email>" for consistent parsing
+                from_str = f"{from_name} <{from_addr}>" if from_name else from_addr
+                self._learn_contact_from_email(from_str)  # Auto-learn contact
                 email = {
                     "id": f"outlook_{msg['id']}",
-                    "from": msg.get("from", {}).get("emailAddress", {}).get("address", "Unknown"),
+                    "from": from_str,
                     "subject": msg.get("subject", "(No subject)"),
                     "date": msg.get("receivedDateTime", ""),
                     "timestamp": 0,  # Would need to parse date
@@ -1654,9 +1697,14 @@ class VeraAgent(Agent):
                     return None
                 msg = await resp.json()
 
+        from_obj = msg.get("from", {}).get("emailAddress", {})
+        from_name = from_obj.get("name", "")
+        from_addr = from_obj.get("address", "Unknown")
+        from_str = f"{from_name} <{from_addr}>" if from_name else from_addr
+        self._learn_contact_from_email(from_str)  # Auto-learn contact
         return {
             "id": f"outlook_{msg_id}",
-            "from": msg.get("from", {}).get("emailAddress", {}).get("address", "Unknown"),
+            "from": from_str,
             "subject": msg.get("subject", "(No subject)"),
             "date": msg.get("receivedDateTime", ""),
             "body": msg.get("body", {}).get("content", "(No content)"),
@@ -1684,9 +1732,14 @@ class VeraAgent(Agent):
 
             results = []
             for msg in data.get("value", []):
+                from_obj = msg.get("from", {}).get("emailAddress", {})
+                from_name = from_obj.get("name", "")
+                from_addr = from_obj.get("address", "Unknown")
+                from_str = f"{from_name} <{from_addr}>" if from_name else from_addr
+                self._learn_contact_from_email(from_str)  # Auto-learn contact
                 email = {
                     "id": f"outlook_{msg['id']}",
-                    "from": msg.get("from", {}).get("emailAddress", {}).get("address", "Unknown"),
+                    "from": from_str,
                     "subject": msg.get("subject", "(No subject)"),
                     "date": msg.get("receivedDateTime", ""),
                     "timestamp": 0,
