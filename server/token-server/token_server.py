@@ -45,12 +45,15 @@ async def get_token(
         room=room,
         can_publish=True,
         can_subscribe=True,
+        can_publish_data=True,
         can_update_own_metadata=True,
+        room_create=True,  # Allow room creation
     ))
 
     jwt_token = token.to_jwt()
 
-    # No manual dispatch needed - LiveKit agents auto-dispatch when users join
+    # Dispatch agent to room
+    await dispatch_agent(room)
 
     return {
         "token": jwt_token,
