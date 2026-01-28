@@ -2138,8 +2138,13 @@ async def entrypoint(ctx: JobContext):
     # Track whether initial greeting has been done (handled by on_enter)
     initial_greeting_done = False
 
+    async def greet_reconnected_user():
+        """Async helper to greet user on reconnection."""
+        await asyncio.sleep(1.0)
+        await session.say("Welcome back! How can I help you?", allow_interruptions=False)
+
     @ctx.room.on("participant_connected")
-    async def on_participant_connected(participant: rtc.RemoteParticipant):
+    def on_participant_connected(participant: rtc.RemoteParticipant):
         nonlocal initial_greeting_done
 
         # Skip other agents
@@ -2151,8 +2156,7 @@ async def entrypoint(ctx: JobContext):
         if initial_greeting_done:
             # Reconnection - say welcome back
             logger.info(f"[ROOM] Reconnection detected, greeting user")
-            await asyncio.sleep(1.0)
-            await session.say("Welcome back! How can I help you?", allow_interruptions=False)
+            asyncio.create_task(greet_reconnected_user())
         else:
             # First connection - on_enter handles the greeting
             initial_greeting_done = True
