@@ -52,8 +52,8 @@ async def get_token(
 
     jwt_token = token.to_jwt()
 
-    # Dispatch agent to room
-    await dispatch_agent(room)
+    # Note: Agent auto-dispatches via LiveKit framework when room is created
+    # Don't call dispatch_agent() here as it causes double dispatch
 
     return {
         "token": jwt_token,
