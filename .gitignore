@@ -39,6 +39,16 @@ web-build/
 vera-mobile/ios/
 vera-mobile/android/
 
+# Xcode
+xcuserdata/
+*.xcuserstate
+build/
+build-release/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
 # Metro
 .metro-health-check*
 
