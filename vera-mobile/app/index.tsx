@@ -492,7 +492,8 @@ export default function HomeScreen() {
 
       // Fetch token from server with unique room per user
       const roomName = `user-${userId}`;
-      const tokenUrl = `${TOKEN_SERVER_URL}/token?room=${roomName}&identity=${userId}`;
+      const userIdentity = `user-${userId}`;
+      const tokenUrl = `${TOKEN_SERVER_URL}/token?room=${roomName}&identity=${userIdentity}`;
       console.log('[FETCH] Attempting to fetch:', tokenUrl);
 
       // Add timeout for token fetch
