@@ -22,4 +22,8 @@ room:
   # Empty room timeout (shorter for faster cleanup)
   empty_timeout: 60
 
+# Agent dispatch - auto-dispatch agent to every room
+agent:
+  enabled: true
+
 # Keys are set via environment variable LIVEKIT_KEYS
