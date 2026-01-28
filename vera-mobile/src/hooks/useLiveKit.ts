@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AudioSession } from '@livekit/react-native';
 
-// Server config - OVHcloud VPS
-const TOKEN_SERVER_URL = 'http://144.217.241.152:7890';
-const LIVEKIT_URL = 'ws://144.217.241.152:7880';
+// Server config - OVHcloud VPS (secure endpoints for release builds)
+const TOKEN_SERVER_URL = 'https://vps-d0703279.vps.ovh.ca';
+const LIVEKIT_URL = 'wss://vps-d0703279.vps.ovh.ca:7443';
 
 // Lazy-loaded LiveKit types
 type LiveKitRoom = any;

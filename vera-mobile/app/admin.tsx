@@ -22,6 +22,7 @@ import {
   isOutlookConnected,
   getOutlookToken,
 } from '../src/services/authService';
+import { useAuthStore } from '../src/store/authStore';
 import {
   fetchGmailEmails,
   fetchOutlookEmails,
@@ -117,9 +118,28 @@ export default function AdminScreen() {
   const [emailBody, setEmailBody] = useState('');
   const [isSending, setIsSending] = useState(false);
 
+  const logout = useAuthStore((state) => state.logout);
+
   useEffect(() => {
     loadConnectionStatus();
   }, []);
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out? You will need to sign in again to use Vera.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+          },
+        },
+      ]
+    );
+  };
 
   const handleSendEmail = async () => {
     if (!emailTo.trim()) {
@@ -600,6 +620,14 @@ export default function AdminScreen() {
         </View>
       )}
 
+      {/* Sign Out Section */}
+      <View style={styles.section}>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={24} color="white" />
+          <Text style={styles.logoutButtonText}>Sign Out</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={{ height: 50 }} />
     </ScrollView>
   );
@@ -791,5 +819,20 @@ const styles = StyleSheet.create({
     marginTop: -8,
     marginBottom: 8,
     marginLeft: 36,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF3B30',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 12,
+  },
+  logoutButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
   },
 });

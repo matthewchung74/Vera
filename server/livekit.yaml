@@ -17,9 +17,9 @@ logging:
 room:
   # Auto-create rooms when agents/clients join
   auto_create: true
-  # Max participants per room (Vera is 1-on-1)
-  max_participants: 3
-  # Empty room timeout
-  empty_timeout: 300
+  # Max participants per room (user + agent only)
+  max_participants: 2
+  # Empty room timeout (shorter for faster cleanup)
+  empty_timeout: 60
 
 # Keys are set via environment variable LIVEKIT_KEYS

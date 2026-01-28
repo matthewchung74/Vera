@@ -25,6 +25,8 @@ import { MessageList, TranscriptMessage } from '../src/components/MessageList';
 import { AttachmentInfo } from '../src/components/AttachmentIndicator';
 import { AttachmentViewer } from '../src/components/AttachmentViewer';
 import { getGmailToken, getOutlookToken } from '../src/services/authService';
+import { useUserStore } from '../src/store/userStore';
+import { useConnectionChime } from '../src/hooks/useConnectionChime';
 
 // Server config - OVHcloud VPS with Caddy HTTPS
 const TOKEN_SERVER_URL = 'https://vps-d0703279.vps.ovh.ca';
@@ -46,17 +48,20 @@ function RoomContent({
   setMessages,
   setAttachments,
   currentBatchIdRef,
+  onAgentFirstSpoke,
 }: {
   state: AppState;
   setState: (s: AppState) => void;
   setMessages: React.Dispatch<React.SetStateAction<TranscriptMessage[]>>;
   setAttachments: React.Dispatch<React.SetStateAction<AttachmentInfo[]>>;
   currentBatchIdRef: React.MutableRefObject<string | null>;
+  onAgentFirstSpoke: () => void;
 }) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const remoteParticipants = useRemoteParticipants();
   const metadataSetRef = useRef(false);
+  const agentHasSpokenRef = useRef(false);
   const [agentState, setAgentState] = useState<string>('listening');
 
   // Get remote audio tracks (agent's voice) - include all audio sources
@@ -109,12 +114,18 @@ function RoomContent({
     if (agentState === 'speaking') {
       console.log('[STATE] Agent state is speaking');
       setState('speaking');
+
+      // Notify parent when agent speaks for the first time (to stop connection chime)
+      if (!agentHasSpokenRef.current) {
+        agentHasSpokenRef.current = true;
+        onAgentFirstSpoke();
+      }
     } else {
       // Agent is listening or thinking - we're in listening mode
       console.log(`[STATE] Agent state is ${agentState} -> listening`);
       setState('listening');
     }
-  }, [agentState, room?.state, setState]);
+  }, [agentState, room?.state, setState, onAgentFirstSpoke]);
 
   // Set metadata when connected (pass OAuth tokens for email tools)
   useEffect(() => {
@@ -402,6 +413,9 @@ export default function HomeScreen() {
   const [selectedAttachment, setSelectedAttachment] = useState<AttachmentInfo | null>(null);
   const currentBatchIdRef = useRef<string | null>(null);
 
+  // Connection chime - plays while connecting, stops when Vera speaks
+  const { startChime, stopChime } = useConnectionChime();
+
   // Animation values for orb
   const orbScale = useRef(new Animated.Value(1.3)).current; // Start larger when idle
   const orbBottom = useRef(new Animated.Value(30)).current; // Start higher when idle
@@ -453,6 +467,19 @@ export default function HomeScreen() {
       setError(null);
       setState('connecting');
 
+      // Start connection chime while connecting
+      startChime();
+
+      // Ensure userStore is initialized before connecting
+      const userStore = useUserStore.getState();
+      if (!userStore.isInitialized) {
+        await userStore.initialize();
+      }
+      const userId = useUserStore.getState().userId;
+      if (!userId) {
+        throw new Error('Failed to initialize user ID');
+      }
+
       // Configure iOS audio for both playback and recording
       // This is critical for hearing Vera's voice on iOS
       await AudioSession.setAppleAudioConfiguration({
@@ -463,38 +490,58 @@ export default function HomeScreen() {
       await AudioSession.startAudioSession();
       console.log('[AUDIO] Audio session started with playAndRecord category');
 
-      // Fetch token from server
-      const tokenUrl = `${TOKEN_SERVER_URL}/token?room=vera-room&identity=user-${Date.now()}`;
+      // Fetch token from server with unique room per user
+      const roomName = `user-${userId}`;
+      const tokenUrl = `${TOKEN_SERVER_URL}/token?room=${roomName}&identity=${userId}`;
       console.log('[FETCH] Attempting to fetch:', tokenUrl);
-      const response = await fetch(tokenUrl);
+
+      // Add timeout for token fetch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(tokenUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
       console.log('[FETCH] Response status:', response.status);
       if (!response.ok) throw new Error('Failed to get token');
       const data = await response.json();
-      console.log('[FETCH] Got token successfully');
+      console.log(`[FETCH] Got token for room: ${roomName}`);
 
       setToken(data.token);
     } catch (err) {
       console.error('Connection error:', err);
-      setError(err instanceof Error ? err.message : 'Connection failed');
+      stopChime(); // Stop chime on error
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Connection timed out');
+      } else {
+        setError(err instanceof Error ? err.message : 'Connection failed');
+      }
       setState('idle');
       await AudioSession.stopAudioSession();
     } finally {
       setIsConnecting(false);
     }
-  }, [token, isConnecting]);
+  }, [token, isConnecting, startChime, stopChime]);
 
   const handleOrbTap = () => {
     handleConnect();
   };
 
   const handleDisconnect = useCallback(async () => {
+    stopChime(); // Stop chime on disconnect
     setToken(null);
     setState('idle');
     setMessages([]);
     setAttachments([]);
     currentBatchIdRef.current = null;
     await AudioSession.stopAudioSession();
-  }, []);
+  }, [stopChime]);
+
+  // Callback for when agent speaks for the first time
+  const handleAgentFirstSpoke = useCallback(() => {
+    console.log('[CHIME] Agent first spoke, stopping chime');
+    stopChime();
+  }, [stopChime]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -514,6 +561,7 @@ export default function HomeScreen() {
             setMessages={setMessages}
             setAttachments={setAttachments}
             currentBatchIdRef={currentBatchIdRef}
+            onAgentFirstSpoke={handleAgentFirstSpoke}
           />
         </LiveKitRoom>
       )}
