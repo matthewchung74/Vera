@@ -33,7 +33,7 @@ const TOKEN_SERVER_URL = 'https://vps-d0703279.vps.ovh.ca';
 const LIVEKIT_URL = 'wss://vps-d0703279.vps.ovh.ca:7443';
 
 // Simple state machine
-type AppState = 'idle' | 'connecting' | 'speaking' | 'listening';
+type AppState = 'idle' | 'connecting' | 'thinking' | 'speaking' | 'listening';
 
 // Component that manages iOS audio - only rendered when room is connected
 function IOSAudioManager({ room }: { room: any }) {
@@ -120,8 +120,12 @@ function RoomContent({
         agentHasSpokenRef.current = true;
         onAgentFirstSpoke();
       }
+    } else if (agentState === 'thinking') {
+      // Agent is thinking (processing, using tools like email search)
+      console.log('[STATE] Agent state is thinking');
+      setState('thinking');
     } else {
-      // Agent is listening or thinking - we're in listening mode
+      // Agent is listening
       console.log(`[STATE] Agent state is ${agentState} -> listening`);
       setState('listening');
     }
@@ -427,7 +431,7 @@ export default function HomeScreen() {
 
   // Animate orb based on state
   useEffect(() => {
-    const isActive = state === 'listening' || state === 'speaking';
+    const isActive = state === 'listening' || state === 'speaking' || state === 'thinking';
     Animated.parallel([
       Animated.spring(orbScale, {
         toValue: isActive ? 1.0 : 1.3,
@@ -583,7 +587,10 @@ export default function HomeScreen() {
             { backgroundColor: error ? '#E65C5C' : (state !== 'idle' ? '#4DC073' : '#808080') }
           ]} />
           <Text style={styles.statusText}>
-            {error ? error : (state === 'connecting' ? 'Connecting...' : (state !== 'idle' ? 'Connected' : 'Disconnected'))}
+            {error ? error :
+              state === 'connecting' ? 'Connecting...' :
+              state === 'thinking' ? 'Thinking...' :
+              state !== 'idle' ? 'Connected' : 'Disconnected'}
           </Text>
         </View>
       </View>
@@ -610,7 +617,7 @@ export default function HomeScreen() {
             isListening={state === 'listening'}
             isVADActive={audioLevel > 0.2}
             isSpeaking={state === 'speaking'}
-            isProcessing={state === 'connecting'}
+            isProcessing={state === 'connecting' || state === 'thinking'}
             audioLevel={audioLevel}
             onPress={handleOrbTap}
           />
