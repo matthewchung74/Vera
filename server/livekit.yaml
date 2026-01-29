@@ -20,6 +20,9 @@ room:
   # Max participants per room (user + agent only)
   max_participants: 2
   # Empty room timeout (shorter for faster cleanup)
-  empty_timeout: 60
+  empty_timeout: 300
+  # How long to wait for participant to reconnect after disconnect
+  # Extended to 5 minutes to allow reconnection with session memory
+  departure_timeout: 300
 
 # Keys are set via environment variable LIVEKIT_KEYS
