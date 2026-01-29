@@ -24,7 +24,7 @@ import { VADOrb } from '../src/components/VADOrb';
 import { MessageList, TranscriptMessage } from '../src/components/MessageList';
 import { AttachmentInfo } from '../src/components/AttachmentIndicator';
 import { AttachmentViewer } from '../src/components/AttachmentViewer';
-import { getGmailToken, getOutlookToken } from '../src/services/authService';
+import { getGmailToken, getOutlookToken, getUserName } from '../src/services/authService';
 import { useUserStore } from '../src/store/userStore';
 import { useConnectionChime } from '../src/hooks/useConnectionChime';
 import { useThinkingSound } from '../src/hooks/useThinkingSound';
@@ -155,11 +155,15 @@ function RoomContent({
           const outlookToken = await getOutlookToken();
           console.log(`[METADATA] Outlook token fetch took ${Date.now() - startTime}ms, result: ${outlookToken ? 'got token' : 'null'}`);
 
-          console.log(`[METADATA] Setting metadata with Gmail: ${gmailToken ? 'yes' : 'no'}, Outlook: ${outlookToken ? 'yes' : 'no'}`);
+          const userName = await getUserName();
+          console.log(`[METADATA] User name: ${userName || 'not available'}`);
+
+          console.log(`[METADATA] Setting metadata with Gmail: ${gmailToken ? 'yes' : 'no'}, Outlook: ${outlookToken ? 'yes' : 'no'}, Name: ${userName || 'none'}`);
 
           await localParticipant.setMetadata(JSON.stringify({
             gmail_token: gmailToken || '',
             outlook_token: outlookToken || '',
+            user_name: userName || '',
           }));
           metadataSetRef.current = true;
           console.log(`[METADATA] Token metadata set successfully (total time: ${Date.now() - startTime}ms)`);

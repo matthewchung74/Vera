@@ -253,10 +253,16 @@ SPAM AND SCAM SAFETY:
 class VeraAgent(Agent):
     """Custom Vera agent with email search tools."""
 
-    def __init__(self, gmail_token: str = "", outlook_token: str = "", room: Optional[rtc.Room] = None):
-        super().__init__(instructions=VERA_BASE_INSTRUCTIONS)
+    def __init__(self, gmail_token: str = "", outlook_token: str = "", user_name: str = "", room: Optional[rtc.Room] = None):
+        # Build instructions with user name if available
+        instructions = VERA_BASE_INSTRUCTIONS
+        if user_name:
+            instructions = f"The user's name is {user_name}. Use their name occasionally to make the conversation personal.\n\n{VERA_BASE_INSTRUCTIONS}"
+
+        super().__init__(instructions=instructions)
         self.gmail_token = gmail_token
         self.outlook_token = outlook_token
+        self.user_name = user_name
         self._email_cache = {}  # Cache for email details
         self._cache_timestamp = None  # When cache was last populated
         self._contacts = {}  # Session contacts: {"sarah": "sarah@gmail.com"}
@@ -2182,12 +2188,13 @@ async def entrypoint(ctx: JobContext):
     # Wait for participant to connect, then connect to room
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-    # Wait for OAuth tokens from client
+    # Wait for OAuth tokens and user info from client
     tokens = await wait_for_tokens(ctx.room, timeout=5.0)
     gmail_token = tokens.get("gmail_token", "")
     outlook_token = tokens.get("outlook_token", "")
+    user_name = tokens.get("user_name", "")
 
-    logger.info(f"Tokens received - Gmail: {'yes' if gmail_token else 'no'}, Outlook: {'yes' if outlook_token else 'no'}")
+    logger.info(f"Tokens received - Gmail: {'yes' if gmail_token else 'no'}, Outlook: {'yes' if outlook_token else 'no'}, User: {user_name or 'unknown'}")
 
     # Create agent session
     session = AgentSession(
@@ -2213,7 +2220,7 @@ async def entrypoint(ctx: JobContext):
     )
 
     # Create agent first so we can reference it in event handlers
-    agent = VeraAgent(gmail_token=gmail_token, outlook_token=outlook_token, room=ctx.room)
+    agent = VeraAgent(gmail_token=gmail_token, outlook_token=outlook_token, user_name=user_name, room=ctx.room)
 
     # Add event handlers for debugging
     @session.on("agent_state_changed")

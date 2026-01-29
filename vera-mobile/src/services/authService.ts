@@ -9,9 +9,11 @@ WebBrowser.maybeCompleteAuthSession();
 const GMAIL_TOKEN_KEY = 'vera_gmail_token';
 const GMAIL_REFRESH_KEY = 'vera_gmail_refresh';
 const GMAIL_EXPIRY_KEY = 'vera_gmail_expiry';
+const GMAIL_USER_NAME_KEY = 'vera_gmail_user_name';
 const OUTLOOK_TOKEN_KEY = 'vera_outlook_token';
 const OUTLOOK_REFRESH_KEY = 'vera_outlook_refresh';
 const OUTLOOK_EXPIRY_KEY = 'vera_outlook_expiry';
+const OUTLOOK_USER_NAME_KEY = 'vera_outlook_user_name';
 
 // OAuth Configuration
 // Gmail (Google Cloud Console)
@@ -20,6 +22,7 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/userinfo.profile',  // For user's name
 ];
 
 // Outlook (Azure)
@@ -28,6 +31,7 @@ const OUTLOOK_SCOPES = [
   'https://graph.microsoft.com/Mail.Read',
   'https://graph.microsoft.com/Mail.Send',
   'https://graph.microsoft.com/Mail.ReadWrite',
+  'https://graph.microsoft.com/User.Read',  // For user's name
   'offline_access',
 ];
 
@@ -90,6 +94,10 @@ export async function connectGmail(): Promise<boolean> {
       await SecureStore.setItemAsync(GMAIL_EXPIRY_KEY, expiryTime.toString());
 
       console.log('Gmail tokens stored, expires in:', tokenResponse.expiresIn, 'seconds');
+
+      // Fetch and store user's name
+      await fetchAndStoreGmailUserName(tokenResponse.accessToken);
+
       return true;
     }
 
@@ -98,6 +106,30 @@ export async function connectGmail(): Promise<boolean> {
     console.error('Gmail auth error:', err);
     return false;
   }
+}
+
+async function fetchAndStoreGmailUserName(token: string): Promise<void> {
+  try {
+    const response = await fetch(
+      'https://www.googleapis.com/oauth2/v2/userinfo',
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (response.ok) {
+      const data = await response.json();
+      // data has: { id, email, name, given_name, family_name, picture }
+      const name = data.given_name || data.name || '';
+      if (name) {
+        await SecureStore.setItemAsync(GMAIL_USER_NAME_KEY, name);
+        console.log('[AUTH] Stored Gmail user name:', name);
+      }
+    }
+  } catch (err) {
+    console.log('[AUTH] Failed to fetch Gmail user name:', err);
+  }
+}
+
+export async function getGmailUserName(): Promise<string | null> {
+  return SecureStore.getItemAsync(GMAIL_USER_NAME_KEY);
 }
 
 async function refreshGmailToken(): Promise<boolean> {
@@ -177,6 +209,7 @@ export async function disconnectGmail(): Promise<void> {
   await SecureStore.deleteItemAsync(GMAIL_TOKEN_KEY);
   await SecureStore.deleteItemAsync(GMAIL_REFRESH_KEY);
   await SecureStore.deleteItemAsync(GMAIL_EXPIRY_KEY);
+  await SecureStore.deleteItemAsync(GMAIL_USER_NAME_KEY);
 }
 
 export async function isGmailConnected(): Promise<boolean> {
@@ -265,6 +298,10 @@ export async function connectOutlook(): Promise<boolean> {
       await SecureStore.setItemAsync(OUTLOOK_EXPIRY_KEY, expiryTime.toString());
 
       console.log('Outlook tokens stored, expires in:', tokenResponse.expiresIn, 'seconds');
+
+      // Fetch and store user's name
+      await fetchAndStoreOutlookUserName(tokenResponse.accessToken);
+
       return true;
     }
 
@@ -273,6 +310,30 @@ export async function connectOutlook(): Promise<boolean> {
     console.error('Outlook auth error:', err);
     return false;
   }
+}
+
+async function fetchAndStoreOutlookUserName(token: string): Promise<void> {
+  try {
+    const response = await fetch(
+      'https://graph.microsoft.com/v1.0/me?$select=givenName,displayName',
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (response.ok) {
+      const data = await response.json();
+      // data has: { givenName, displayName, surname, mail, ... }
+      const name = data.givenName || data.displayName || '';
+      if (name) {
+        await SecureStore.setItemAsync(OUTLOOK_USER_NAME_KEY, name);
+        console.log('[AUTH] Stored Outlook user name:', name);
+      }
+    }
+  } catch (err) {
+    console.log('[AUTH] Failed to fetch Outlook user name:', err);
+  }
+}
+
+export async function getOutlookUserName(): Promise<string | null> {
+  return SecureStore.getItemAsync(OUTLOOK_USER_NAME_KEY);
 }
 
 async function refreshOutlookToken(): Promise<boolean> {
@@ -334,6 +395,7 @@ export async function disconnectOutlook(): Promise<void> {
   await SecureStore.deleteItemAsync(OUTLOOK_TOKEN_KEY);
   await SecureStore.deleteItemAsync(OUTLOOK_REFRESH_KEY);
   await SecureStore.deleteItemAsync(OUTLOOK_EXPIRY_KEY);
+  await SecureStore.deleteItemAsync(OUTLOOK_USER_NAME_KEY);
 }
 
 export async function isOutlookConnected(): Promise<boolean> {
@@ -374,4 +436,17 @@ export async function isOutlookConnected(): Promise<boolean> {
     console.error('Outlook validation error:', err);
     return false;
   }
+}
+
+// ==================== User Name ====================
+
+export async function getUserName(): Promise<string | null> {
+  // Try Gmail first, then Outlook
+  const gmailName = await getGmailUserName();
+  if (gmailName) return gmailName;
+
+  const outlookName = await getOutlookUserName();
+  if (outlookName) return outlookName;
+
+  return null;
 }
