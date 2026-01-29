@@ -31,6 +31,13 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/google-credentials.json
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
     restart: unless-stopped
+    # Health check - restart if agent stops responding
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Token server - generates JWT tokens for clients
   token-server:
