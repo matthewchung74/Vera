@@ -259,10 +259,13 @@ class VeraAgent(Agent):
         if user_name:
             instructions = f"The user's name is {user_name}. Use their name occasionally to make the conversation personal.\n\n{VERA_BASE_INSTRUCTIONS}"
 
-        # Include Google Search as a provider tool for real-time information
+        # Include Google Search and Code Execution as provider tools
         super().__init__(
             instructions=instructions,
-            tools=[google.tools.GoogleSearch()],  # Native Gemini Google Search
+            tools=[
+                google.tools.GoogleSearch(),      # Native Gemini Google Search
+                google.tools.CodeExecution(),     # Python code execution for calculations
+            ],
         )
         self.gmail_token = gmail_token
         self.outlook_token = outlook_token
