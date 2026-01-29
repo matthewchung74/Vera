@@ -1209,78 +1209,6 @@ class VeraAgent(Agent):
             return "No email accounts are connected. Please connect Gmail or Outlook in the app settings."
 
     @function_tool()
-    async def web_search(
-        self,
-        context: RunContext,
-        query: str,
-    ) -> str:
-        """Search the web for information.
-        Use this when the user asks about current events, news, weather, or anything
-        that requires up-to-date information from the internet.
-
-        Args:
-            query: The search query to look up
-        """
-        logger.info(f"[TOOL] web_search called: query='{query}'")
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                # Use DuckDuckGo instant answer API (free, no key needed)
-                url = "https://api.duckduckgo.com/"
-                params = {
-                    "q": query,
-                    "format": "json",
-                    "no_html": 1,
-                    "skip_disambig": 1,
-                }
-
-                async with session.get(url, params=params, timeout=10) as resp:
-                    if resp.status != 200:
-                        return f"I couldn't search for that right now. Please try again."
-
-                    data = await resp.json()
-
-                    # Try to get the abstract (main answer)
-                    abstract = data.get("AbstractText", "")
-                    if abstract:
-                        source = data.get("AbstractSource", "")
-                        source_url = data.get("AbstractURL", "")
-                        result = abstract
-                        if source:
-                            result += f" (Source: {source})"
-                        logger.info(f"[TOOL] Web search found abstract: {abstract[:100]}...")
-                        return result
-
-                    # Try instant answer
-                    answer = data.get("Answer", "")
-                    if answer:
-                        logger.info(f"[TOOL] Web search found answer: {answer}")
-                        return answer
-
-                    # Try related topics
-                    related = data.get("RelatedTopics", [])
-                    if related and len(related) > 0:
-                        topics = []
-                        for topic in related[:3]:
-                            if isinstance(topic, dict) and "Text" in topic:
-                                topics.append(topic["Text"])
-                        if topics:
-                            result = "Here's what I found: " + " ".join(topics)
-                            logger.info(f"[TOOL] Web search found related topics")
-                            return result
-
-                    # No good results
-                    logger.info(f"[TOOL] Web search found no results for: {query}")
-                    return f"I couldn't find specific information about that. Try asking in a different way."
-
-        except asyncio.TimeoutError:
-            logger.warning(f"[TOOL] Web search timed out for: {query}")
-            return "The search took too long. Please try again."
-        except Exception as e:
-            logger.error(f"[TOOL] Web search error: {e}")
-            return "I had trouble searching the web. Please try again."
-
-    @function_tool()
     async def end_conversation(
         self,
         context: RunContext,
@@ -2451,17 +2379,18 @@ async def entrypoint(ctx: JobContext):
         # Extract user ID from identity (format: "user-{userId}")
         user_id = participant.identity.replace('user-', '')
 
-        if initial_greeting_done:
-            # Reconnection - interrupt any ongoing speech first (e.g., goodbye message from disconnect)
-            logger.info(f"[ROOM] Reconnection detected, interrupting any ongoing speech")
-            session.interrupt()
+        # Always interrupt any ongoing speech (e.g., goodbye message from disconnect)
+        # This is harmless if nothing is playing
+        logger.info(f"[ROOM] Interrupting any ongoing speech")
+        session.interrupt()
 
-            # Give a brief moment for interruption to take effect
+        if initial_greeting_done:
+            # Reconnection - greet with context
             async def greet_after_interrupt():
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.5)  # Brief pause after interrupt
                 await greet_reconnected_user(user_id)
 
-            logger.info(f"[ROOM] Greeting user {user_id} with context")
+            logger.info(f"[ROOM] Reconnection detected, greeting user {user_id} with context")
             asyncio.create_task(greet_after_interrupt())
         else:
             # First connection - on_enter handles the greeting
