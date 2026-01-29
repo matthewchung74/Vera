@@ -2304,6 +2304,7 @@ async def entrypoint(ctx: JobContext):
         llm=google.LLM(
             model="gemini-3-flash-preview",
             temperature=0.5,  # Lower for steadier, less verbose responses
+            tools=[google.tools.GoogleSearch()],  # Enable native Google Search
         ),
         tts=deepgram.TTS(
             model="aura-2-thalia-en",
