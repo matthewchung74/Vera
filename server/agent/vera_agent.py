@@ -2290,8 +2290,9 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Vera is now listening with email tools...")
 
     # Track whether initial greeting has been done (handled by on_enter)
-    # Set to False - first connection uses on_enter greeting, subsequent connections use reconnection greeting
-    initial_greeting_done = False
+    # Set to True - on_enter always handles first greeting before participant_connected fires
+    # Any participant_connected event after this is a reconnection
+    initial_greeting_done = True
 
     # Track last disconnected user for session saving
     last_disconnected_user_id = None
