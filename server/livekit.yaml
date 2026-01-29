@@ -25,4 +25,9 @@ room:
   # Extended to 5 minutes to allow reconnection with session memory
   departure_timeout: 300
 
+# Agent dispatch - auto-dispatch agent when room is created
+agent:
+  # Enable agent auto-dispatch for all rooms
+  enabled: true
+
 # Keys are set via environment variable LIVEKIT_KEYS
