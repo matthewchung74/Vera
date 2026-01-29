@@ -27,6 +27,7 @@ import { AttachmentViewer } from '../src/components/AttachmentViewer';
 import { getGmailToken, getOutlookToken } from '../src/services/authService';
 import { useUserStore } from '../src/store/userStore';
 import { useConnectionChime } from '../src/hooks/useConnectionChime';
+import { useThinkingSound } from '../src/hooks/useThinkingSound';
 
 // Server config - OVHcloud VPS with Caddy HTTPS
 const TOKEN_SERVER_URL = 'https://vps-d0703279.vps.ovh.ca';
@@ -95,13 +96,19 @@ function RoomContent({
     }
   }, [remoteParticipants]);
 
-  // Log audio track changes for debugging
+  // Log audio track changes for debugging and stop chime when agent audio arrives
   useEffect(() => {
     console.log(`[AUDIO] Total tracks: ${audioTracks.length}, Remote tracks: ${remoteAudioTracks.length}`);
     remoteAudioTracks.forEach((track, i) => {
       console.log(`[AUDIO] Track ${i}: ${track.participant.identity} - ${track.publication?.trackSid}`);
     });
-  }, [audioTracks.length, remoteAudioTracks.length]);
+
+    // Stop chime as soon as we have agent audio (backup trigger)
+    if (remoteAudioTracks.length > 0) {
+      console.log('[AUDIO] Agent audio detected, stopping chime');
+      onAgentFirstSpoke();
+    }
+  }, [audioTracks.length, remoteAudioTracks.length, onAgentFirstSpoke]);
 
   // Update state based on agent's actual state (not just track presence)
   useEffect(() => {
@@ -115,11 +122,8 @@ function RoomContent({
       console.log('[STATE] Agent state is speaking');
       setState('speaking');
 
-      // Notify parent when agent speaks for the first time (to stop connection chime)
-      if (!agentHasSpokenRef.current) {
-        agentHasSpokenRef.current = true;
-        onAgentFirstSpoke();
-      }
+      // Stop chime every time agent speaks (not just first time) as backup
+      onAgentFirstSpoke();
     } else if (agentState === 'thinking') {
       // Agent is thinking (processing, using tools like email search)
       console.log('[STATE] Agent state is thinking');
@@ -420,6 +424,9 @@ export default function HomeScreen() {
   // Connection chime - plays while connecting, stops when Vera speaks
   const { startChime, stopChime } = useConnectionChime();
 
+  // Thinking sound - plays while Vera is thinking/processing
+  const { startThinking: startThinkingSound, stopThinking: stopThinkingSound } = useThinkingSound();
+
   // Animation values for orb
   const orbScale = useRef(new Animated.Value(1.3)).current; // Start larger when idle
   const orbBottom = useRef(new Animated.Value(30)).current; // Start higher when idle
@@ -428,6 +435,15 @@ export default function HomeScreen() {
   useEffect(() => {
     console.log(`[STATE] -> ${state}`);
   }, [state]);
+
+  // Play/stop thinking sound based on state
+  useEffect(() => {
+    if (state === 'thinking') {
+      startThinkingSound();
+    } else {
+      stopThinkingSound();
+    }
+  }, [state, startThinkingSound, stopThinkingSound]);
 
   // Animate orb based on state
   useEffect(() => {
@@ -446,10 +462,12 @@ export default function HomeScreen() {
     ]).start();
   }, [state, orbScale, orbBottom]);
 
-  // Clear messages and attachments when token becomes null (disconnect)
+  // Clear attachments when token becomes null (disconnect)
+  // Keep messages for visual continuity - user can see conversation history
   useEffect(() => {
     if (!token) {
-      setMessages([]);
+      // Don't clear messages - preserve them for visual continuity on reconnect
+      // setMessages([]);
       setAttachments([]);
       currentBatchIdRef.current = null;
     }
@@ -534,13 +552,15 @@ export default function HomeScreen() {
 
   const handleDisconnect = useCallback(async () => {
     stopChime(); // Stop chime on disconnect
+    stopThinkingSound(); // Stop thinking sound on disconnect
     setToken(null);
     setState('idle');
-    setMessages([]);
+    // Don't clear messages - preserve them for visual continuity on reconnect
+    // setMessages([]);
     setAttachments([]);
     currentBatchIdRef.current = null;
     await AudioSession.stopAudioSession();
-  }, [stopChime]);
+  }, [stopChime, stopThinkingSound]);
 
   // Callback for when agent speaks for the first time
   const handleAgentFirstSpoke = useCallback(() => {
@@ -601,6 +621,7 @@ export default function HomeScreen() {
           messages={messages}
           attachments={attachments}
           onAttachmentSelect={setSelectedAttachment}
+          isThinking={state === 'thinking'}
         />
       </View>
 

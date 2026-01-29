@@ -9,3 +9,6 @@ python-dotenv>=1.0.0
 
 # PDF text extraction for email attachments
 pdfplumber>=0.10.0
+
+# Redis for session storage (reconnection memory)
+redis>=5.0.0

@@ -12,6 +12,7 @@ import uuid
 import re
 import base64
 import aiohttp
+import redis
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -36,6 +37,118 @@ load_dotenv()
 
 logger = logging.getLogger("vera-agent")
 logger.setLevel(logging.INFO)
+
+# Redis client for session storage (reconnection memory)
+# Connects to Redis service in docker-compose
+redis_client = redis.Redis(host='redis', port=6379, decode_responses=True)
+
+# Session expiry times
+SESSION_TTL_SECONDS = 86400  # 24 hours
+SESSION_RECENT_THRESHOLD = 3600  # 1 hour - sessions newer than this get full context greeting
+
+
+def extract_topic_from_messages(messages: list) -> tuple[str, str]:
+    """Extract the main topic and a summary from recent conversation messages.
+
+    Returns (topic, summary) tuple.
+    """
+    if not messages:
+        return "your emails", ""
+
+    # Look through recent messages for email-related topics and context
+    topics = []
+    senders = []
+    subjects = []
+
+    for msg in messages[-8:]:
+        # Get text content from message (handle different message formats)
+        text = ""
+        if hasattr(msg, 'text_content'):
+            text = (msg.text_content or "").lower()
+        elif hasattr(msg, 'content'):
+            text = (msg.content or "").lower()
+        else:
+            text = str(msg).lower()
+
+        # Look for common email topics and senders
+        if "lyft" in text:
+            topics.append("a Lyft email")
+            senders.append("Lyft")
+        elif "uber" in text:
+            topics.append("an Uber email")
+            senders.append("Uber")
+        elif "amazon" in text:
+            topics.append("an Amazon email")
+            senders.append("Amazon")
+        elif "bill" in text or "payment" in text or "invoice" in text:
+            topics.append("a bill")
+        elif "doctor" in text or "appointment" in text or "medical" in text:
+            topics.append("a medical appointment")
+        elif "family" in text or any(kin in text for kin in ["mom", "dad", "daughter", "son", "sister", "brother", "grandma", "grandpa"]):
+            topics.append("a family email")
+        elif "discount" in text or "offer" in text or "promo" in text or "sale" in text:
+            topics.append("a promotional email")
+        elif "spam" in text or "junk" in text or "scam" in text:
+            topics.append("a suspicious email")
+
+        # Look for subject mentions
+        if "about" in text:
+            # Try to extract what it's about
+            parts = text.split("about")
+            if len(parts) > 1:
+                subject_part = parts[1][:50].strip()
+                if subject_part:
+                    subjects.append(subject_part)
+
+    topic = topics[-1] if topics else "your emails"
+
+    # Build summary
+    if senders:
+        sender = senders[-1]
+        if subjects:
+            summary = f"We were looking at {topic} from {sender}"
+        else:
+            summary = f"We were checking {topic} from {sender}"
+    elif topics:
+        summary = f"We were looking at {topic}"
+    else:
+        summary = ""
+
+    return topic, summary
+
+
+def save_session_to_redis(user_id: str, summary: str, topic: str):
+    """Save session data to Redis."""
+    try:
+        session_data = {
+            "summary": summary,
+            "last_topic": topic,
+            "timestamp": time.time()
+        }
+        redis_client.setex(
+            f"vera:session:{user_id}",
+            SESSION_TTL_SECONDS,
+            json.dumps(session_data)
+        )
+        logger.info(f"[REDIS] Saved session for user {user_id}: {topic}")
+    except Exception as e:
+        logger.warning(f"[REDIS] Failed to save session: {e}")
+
+
+def load_session_from_redis(user_id: str) -> Optional[dict]:
+    """Load session data from Redis."""
+    try:
+        data = redis_client.get(f"vera:session:{user_id}")
+        if data:
+            session = json.loads(data)
+            logger.info(f"[REDIS] Loaded session for user {user_id}: {session.get('last_topic', 'unknown')}")
+            return session
+        logger.info(f"[REDIS] No session found for user {user_id}")
+        return None
+    except Exception as e:
+        logger.warning(f"[REDIS] Failed to load session: {e}")
+        return None
+
 
 # Kin terms for contact resolution
 KIN_TERMS = {"mom", "mother", "dad", "father", "daughter", "son", "sister", "brother",
@@ -2136,12 +2249,81 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Vera is now listening with email tools...")
 
     # Track whether initial greeting has been done (handled by on_enter)
+    # Set to False - first connection uses on_enter greeting, subsequent connections use reconnection greeting
     initial_greeting_done = False
 
-    async def greet_reconnected_user():
-        """Async helper to greet user on reconnection."""
+    # Track last disconnected user for session saving
+    last_disconnected_user_id = None
+
+    async def save_session_on_disconnect(user_id: str):
+        """Save conversation summary when user disconnects."""
+        try:
+            # Get conversation history from session
+            history = session.history
+            messages = list(history.items) if history else []
+
+            if len(messages) < 2:
+                logger.info(f"[SESSION] Not enough messages to save for user {user_id}")
+                return
+
+            # Extract topic and summary from messages
+            topic, summary = extract_topic_from_messages(messages)
+
+            if not summary:
+                # Fallback to simple topic-based summary
+                summary = f"We were looking at {topic}"
+
+            # Save to Redis
+            save_session_to_redis(user_id, summary, topic)
+
+        except Exception as e:
+            logger.warning(f"[SESSION] Failed to save session on disconnect: {e}")
+
+    async def greet_reconnected_user(user_id: str):
+        """Greet user with context from previous session."""
         await asyncio.sleep(1.0)
-        await session.say("Welcome back! How can I help you?", allow_interruptions=False)
+
+        # Try to load previous session from Redis
+        session_data = load_session_from_redis(user_id)
+
+        if session_data:
+            summary = session_data.get("summary", "")
+            topic = session_data.get("last_topic", "your emails")
+            session_time = session_data.get("timestamp", 0)
+            age_seconds = time.time() - session_time
+
+            if age_seconds < SESSION_RECENT_THRESHOLD:
+                # Recent session (< 1 hour) - give full context
+                if summary:
+                    greeting = f"Welcome back! {summary} Would you like to continue?"
+                else:
+                    greeting = f"Welcome back! We were looking at {topic}. Want to continue?"
+            else:
+                # Older session - brief mention
+                greeting = f"Welcome back! Last time we talked about {topic}. How can I help today?"
+
+            logger.info(f"[SESSION] Contextual greeting for {user_id}: {greeting}")
+        else:
+            # No previous session - generic greeting
+            greeting = "Welcome back! How can I help you?"
+            logger.info(f"[SESSION] No session found, using generic greeting for {user_id}")
+
+        await session.say(greeting, allow_interruptions=False)
+
+    @ctx.room.on("participant_disconnected")
+    def on_participant_disconnected(participant: rtc.RemoteParticipant):
+        """Handle participant disconnect - save session for reconnection."""
+        # Skip other agents
+        if 'agent' in participant.identity.lower():
+            return
+
+        logger.info(f"[ROOM] Participant disconnected: {participant.identity}")
+
+        # Extract user ID from identity (format: "user-{userId}")
+        user_id = participant.identity.replace('user-', '')
+
+        # Save session asynchronously
+        asyncio.create_task(save_session_on_disconnect(user_id))
 
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant: rtc.RemoteParticipant):
@@ -2153,10 +2335,13 @@ async def entrypoint(ctx: JobContext):
 
         logger.info(f"[ROOM] Participant connected: {participant.identity}")
 
+        # Extract user ID from identity (format: "user-{userId}")
+        user_id = participant.identity.replace('user-', '')
+
         if initial_greeting_done:
-            # Reconnection - say welcome back
-            logger.info(f"[ROOM] Reconnection detected, greeting user")
-            asyncio.create_task(greet_reconnected_user())
+            # Reconnection - say welcome back with context
+            logger.info(f"[ROOM] Reconnection detected, greeting user {user_id} with context")
+            asyncio.create_task(greet_reconnected_user(user_id))
         else:
             # First connection - on_enter handles the greeting
             initial_greeting_done = True
