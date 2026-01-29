@@ -264,7 +264,7 @@ class VeraAgent(Agent):
             instructions=instructions,
             tools=[
                 google.tools.GoogleSearch(),      # Native Gemini Google Search
-                google.tools.CodeExecution(),     # Python code execution for calculations
+                google.tools.ToolCodeExecution(),  # Python code execution for calculations
             ],
         )
         self.gmail_token = gmail_token
