@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, FlatList, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, FlatList, StyleSheet, Animated, Easing } from 'react-native';
 import { AttachmentRow, AttachmentInfo } from './AttachmentIndicator';
 
 export interface TranscriptMessage {
@@ -13,6 +13,74 @@ interface MessageListProps {
   messages: TranscriptMessage[];
   attachments: AttachmentInfo[];
   onAttachmentSelect: (attachment: AttachmentInfo) => void;
+  isThinking?: boolean;
+}
+
+function ThinkingIndicator() {
+  const dot1Anim = useRef(new Animated.Value(0)).current;
+  const dot2Anim = useRef(new Animated.Value(0)).current;
+  const dot3Anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const createPulse = (animValue: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(animValue, {
+            toValue: 1,
+            duration: 400,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(animValue, {
+            toValue: 0,
+            duration: 400,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+    };
+
+    const anim1 = createPulse(dot1Anim, 0);
+    const anim2 = createPulse(dot2Anim, 200);
+    const anim3 = createPulse(dot3Anim, 400);
+
+    anim1.start();
+    anim2.start();
+    anim3.start();
+
+    return () => {
+      anim1.stop();
+      anim2.stop();
+      anim3.stop();
+    };
+  }, [dot1Anim, dot2Anim, dot3Anim]);
+
+  const getAnimatedStyle = (animValue: Animated.Value) => ({
+    opacity: animValue.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    }),
+    transform: [
+      {
+        scale: animValue.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.3],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <View style={styles.thinkingRow}>
+      <View style={styles.thinkingDots}>
+        <Animated.View style={[styles.dot, getAnimatedStyle(dot1Anim)]} />
+        <Animated.View style={[styles.dot, getAnimatedStyle(dot2Anim)]} />
+        <Animated.View style={[styles.dot, getAnimatedStyle(dot3Anim)]} />
+      </View>
+    </View>
+  );
 }
 
 function MessageBubble({
@@ -51,7 +119,7 @@ function MessageBubble({
   );
 }
 
-export function MessageList({ messages, attachments, onAttachmentSelect }: MessageListProps) {
+export function MessageList({ messages, attachments, onAttachmentSelect, isThinking }: MessageListProps) {
   // Sort by timestamp descending (newest first at top)
   const sortedMessages = [...messages].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -61,11 +129,20 @@ export function MessageList({ messages, attachments, onAttachmentSelect }: Messa
     .sort((a, b) => b.timestamp - a.timestamp)[0];
   const latestAgentId = latestAgentMessage?.id;
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && !isThinking) {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyText}>Hello, I'm Vera.</Text>
         <Text style={styles.emptySubtext}>Tap the mic to talk.</Text>
+      </View>
+    );
+  }
+
+  // Show thinking indicator even with no messages
+  if (messages.length === 0 && isThinking) {
+    return (
+      <View style={styles.emptyContainer}>
+        <ThinkingIndicator />
       </View>
     );
   }
@@ -82,6 +159,7 @@ export function MessageList({ messages, attachments, onAttachmentSelect }: Messa
           onAttachmentSelect={onAttachmentSelect}
         />
       )}
+      ListHeaderComponent={isThinking ? <ThinkingIndicator /> : null}
       removeClippedSubviews={false}
       contentContainerStyle={styles.listContent}
       showsVerticalScrollIndicator={false}
@@ -124,6 +202,24 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     lineHeight: 28,
     color: '#333340',
+  },
+  // Thinking indicator
+  thinkingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    paddingRight: 40,
+  },
+  thinkingDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#333340',
+    marginHorizontal: 3,
   },
   // Empty state
   emptyContainer: {
