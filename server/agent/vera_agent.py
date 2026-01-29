@@ -180,6 +180,8 @@ Your capabilities:
 - Answer questions
 - Provide companionship
 - Help with general tasks
+- Search the web for current information (stock prices, weather, news, etc.) using Google Search
+- Do math calculations using Python code execution
 - Search and read the user's emails using the tools provided
 - Compose and send new emails using compose_email tool
 - Reply to emails using reply_to_email tool
