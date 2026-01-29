@@ -2266,10 +2266,6 @@ async def entrypoint(ctx: JobContext):
     # Create agent first so we can reference it in event handlers
     agent = VeraAgent(gmail_token=gmail_token, outlook_token=outlook_token, user_name=user_name, room=ctx.room)
 
-    # Debug: Log registered tools
-    logger.info(f"[TOOLS] Agent tools: {agent._tools if hasattr(agent, '_tools') else 'no _tools attr'}")
-    logger.info(f"[TOOLS] Agent registered tools count: {len(agent._tools) if hasattr(agent, '_tools') else 0}")
-
     # Add event handlers for debugging
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
