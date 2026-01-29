@@ -262,12 +262,14 @@ class VeraAgent(Agent):
             instructions = f"The user's name is {user_name}. Use their name occasionally to make the conversation personal.\n\n{VERA_BASE_INSTRUCTIONS}"
 
         # Include Google Search and Code Execution as provider tools
+        provider_tools = [
+            google.tools.GoogleSearch(),      # Native Gemini Google Search
+            google.tools.ToolCodeExecution(),  # Python code execution for calculations
+        ]
+        logger.info(f"[VERA] Initializing with provider tools: {provider_tools}")
         super().__init__(
             instructions=instructions,
-            tools=[
-                google.tools.GoogleSearch(),      # Native Gemini Google Search
-                google.tools.ToolCodeExecution(),  # Python code execution for calculations
-            ],
+            tools=provider_tools,
         )
         self.gmail_token = gmail_token
         self.outlook_token = outlook_token
@@ -2257,6 +2259,10 @@ async def entrypoint(ctx: JobContext):
 
     # Create agent first so we can reference it in event handlers
     agent = VeraAgent(gmail_token=gmail_token, outlook_token=outlook_token, user_name=user_name, room=ctx.room)
+
+    # Debug: Log registered tools
+    logger.info(f"[TOOLS] Agent tools: {agent._tools if hasattr(agent, '_tools') else 'no _tools attr'}")
+    logger.info(f"[TOOLS] Agent registered tools count: {len(agent._tools) if hasattr(agent, '_tools') else 0}")
 
     # Add event handlers for debugging
     @session.on("agent_state_changed")
