@@ -573,7 +573,11 @@ export default function HomeScreen() {
   }, [token, isConnecting, startChime, stopChime]);
 
   const handleOrbTap = () => {
-    handleConnect();
+    if (state === 'idle') {
+      handleConnect();
+    } else {
+      handleDisconnect();
+    }
   };
 
   const handleDisconnect = useCallback(async () => {
