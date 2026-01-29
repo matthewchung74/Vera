@@ -2452,9 +2452,17 @@ async def entrypoint(ctx: JobContext):
         user_id = participant.identity.replace('user-', '')
 
         if initial_greeting_done:
-            # Reconnection - say welcome back with context
-            logger.info(f"[ROOM] Reconnection detected, greeting user {user_id} with context")
-            asyncio.create_task(greet_reconnected_user(user_id))
+            # Reconnection - interrupt any ongoing speech first (e.g., goodbye message from disconnect)
+            logger.info(f"[ROOM] Reconnection detected, interrupting any ongoing speech")
+            session.interrupt()
+
+            # Give a brief moment for interruption to take effect
+            async def greet_after_interrupt():
+                await asyncio.sleep(0.3)
+                await greet_reconnected_user(user_id)
+
+            logger.info(f"[ROOM] Greeting user {user_id} with context")
+            asyncio.create_task(greet_after_interrupt())
         else:
             # First connection - on_enter handles the greeting
             initial_greeting_done = True
