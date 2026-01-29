@@ -259,7 +259,11 @@ class VeraAgent(Agent):
         if user_name:
             instructions = f"The user's name is {user_name}. Use their name occasionally to make the conversation personal.\n\n{VERA_BASE_INSTRUCTIONS}"
 
-        super().__init__(instructions=instructions)
+        # Include Google Search as a provider tool for real-time information
+        super().__init__(
+            instructions=instructions,
+            tools=[google.tools.GoogleSearch()],  # Native Gemini Google Search
+        )
         self.gmail_token = gmail_token
         self.outlook_token = outlook_token
         self.user_name = user_name
@@ -2304,7 +2308,6 @@ async def entrypoint(ctx: JobContext):
         llm=google.LLM(
             model="gemini-3-flash-preview",
             temperature=0.5,  # Lower for steadier, less verbose responses
-            tools=[google.tools.GoogleSearch()],  # Enable native Google Search
         ),
         tts=deepgram.TTS(
             model="aura-2-thalia-en",
