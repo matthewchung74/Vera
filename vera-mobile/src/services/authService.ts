@@ -441,12 +441,28 @@ export async function isOutlookConnected(): Promise<boolean> {
 // ==================== User Name ====================
 
 export async function getUserName(): Promise<string | null> {
-  // Try Gmail first, then Outlook
-  const gmailName = await getGmailUserName();
+  // Try stored Gmail name first
+  let gmailName = await getGmailUserName();
   if (gmailName) return gmailName;
 
-  const outlookName = await getOutlookUserName();
+  // Try stored Outlook name
+  let outlookName = await getOutlookUserName();
   if (outlookName) return outlookName;
+
+  // No stored name - try to fetch it from existing token (for existing users)
+  const gmailToken = await getGmailToken();
+  if (gmailToken) {
+    await fetchAndStoreGmailUserName(gmailToken);
+    gmailName = await getGmailUserName();
+    if (gmailName) return gmailName;
+  }
+
+  const outlookToken = await getOutlookToken();
+  if (outlookToken) {
+    await fetchAndStoreOutlookUserName(outlookToken);
+    outlookName = await getOutlookUserName();
+    if (outlookName) return outlookName;
+  }
 
   return null;
 }

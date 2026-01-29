@@ -26,6 +26,7 @@ import { AttachmentInfo } from '../src/components/AttachmentIndicator';
 import { AttachmentViewer } from '../src/components/AttachmentViewer';
 import { getGmailToken, getOutlookToken, getUserName } from '../src/services/authService';
 import { useUserStore } from '../src/store/userStore';
+import { useAuthStore } from '../src/store/authStore';
 import { useConnectionChime } from '../src/hooks/useConnectionChime';
 import { useThinkingSound } from '../src/hooks/useThinkingSound';
 
@@ -50,6 +51,7 @@ function RoomContent({
   setAttachments,
   currentBatchIdRef,
   onAgentFirstSpoke,
+  onRequestDisconnect,
 }: {
   state: AppState;
   setState: (s: AppState) => void;
@@ -57,6 +59,7 @@ function RoomContent({
   setAttachments: React.Dispatch<React.SetStateAction<AttachmentInfo[]>>;
   currentBatchIdRef: React.MutableRefObject<string | null>;
   onAgentFirstSpoke: () => void;
+  onRequestDisconnect: () => void;
 }) {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
@@ -240,6 +243,14 @@ function RoomContent({
         const text = new TextDecoder().decode(payload);
         const data = JSON.parse(text);
 
+        // Handle disconnect signal from agent
+        if (data.type === 'disconnect') {
+          console.log('[DATA] Received disconnect signal from agent:', data.reason);
+          // Trigger full disconnect
+          onRequestDisconnect();
+          return;
+        }
+
         // Note: Transcripts now handled by TranscriptionReceived event, not data channel
 
         // Handle attachment messages
@@ -402,7 +413,7 @@ function RoomContent({
       room.off(RoomEvent.DataReceived, handleDataReceived);
       room.off(RoomEvent.TranscriptionReceived, handleTranscriptionReceived);
     };
-  }, [room, setState, setAgentState, setMessages, setAttachments, currentBatchIdRef]);
+  }, [room, setState, setAgentState, setMessages, setAttachments, currentBatchIdRef, onRequestDisconnect]);
 
   // Render iOS audio manager when room is connected
   if (room && room.state === ConnectionState.Connected) {
@@ -414,6 +425,7 @@ function RoomContent({
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { isAuthenticated } = useAuthStore();
 
   const [state, setState] = useState<AppState>('idle');
   const [audioLevel] = useState(0);
@@ -424,6 +436,16 @@ export default function HomeScreen() {
   const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
   const [selectedAttachment, setSelectedAttachment] = useState<AttachmentInfo | null>(null);
   const currentBatchIdRef = useRef<string | null>(null);
+
+  // Disconnect when not authenticated (e.g., when navigating to login)
+  useEffect(() => {
+    if (!isAuthenticated && token) {
+      console.log('[AUTH] Not authenticated, disconnecting...');
+      setToken(null);
+      setState('idle');
+      AudioSession.stopAudioSession();
+    }
+  }, [isAuthenticated, token]);
 
   // Connection chime - plays while connecting, stops when Vera speaks
   const { startChime, stopChime } = useConnectionChime();
@@ -591,6 +613,7 @@ export default function HomeScreen() {
             setAttachments={setAttachments}
             currentBatchIdRef={currentBatchIdRef}
             onAgentFirstSpoke={handleAgentFirstSpoke}
+            onRequestDisconnect={handleDisconnect}
           />
         </LiveKitRoom>
       )}

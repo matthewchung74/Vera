@@ -1201,6 +1201,33 @@ class VeraAgent(Agent):
         else:
             return "No email accounts are connected. Please connect Gmail or Outlook in the app settings."
 
+    @function_tool()
+    async def end_conversation(
+        self,
+        context: RunContext,
+    ) -> str:
+        """End the conversation and disconnect the call.
+        Use this when the user asks to disconnect, hang up, end the call, or says goodbye.
+
+        Args:
+            None
+        """
+        logger.info("[TOOL] end_conversation called - user requested disconnect")
+
+        # Publish disconnect signal to mobile client via data channel
+        if self._room:
+            try:
+                disconnect_data = json.dumps({"type": "disconnect", "reason": "user_requested"})
+                await self._room.local_participant.publish_data(
+                    disconnect_data.encode('utf-8'),
+                    reliable=True
+                )
+                logger.info("[TOOL] Disconnect signal sent to client")
+            except Exception as e:
+                logger.warning(f"[TOOL] Failed to send disconnect signal: {e}")
+
+        return "Goodbye! Take care."
+
     # ==================== Gmail API Methods ====================
 
     async def _search_gmail(self, query: str, days_back: int) -> tuple:
