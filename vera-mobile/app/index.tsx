@@ -37,11 +37,11 @@ const LIVEKIT_URL = 'wss://vps-d0703279.vps.ovh.ca:7443';
 // Simple state machine
 type AppState = 'idle' | 'connecting' | 'thinking' | 'speaking' | 'listening';
 
-// Component that manages iOS audio - only rendered when room is connected
-function IOSAudioManager({ room }: { room: any }) {
-  useIOSAudioManagement(room, true); // true = prefer speaker output
-  return null;
-}
+// Component that manages iOS audio - DISABLED to avoid voice processing crash
+// function IOSAudioManager({ room }: { room: any }) {
+//   useIOSAudioManagement(room, true); // true = prefer speaker output
+//   return null;
+// }
 
 // Inner component that uses LiveKit hooks (must be inside LiveKitRoom)
 function RoomContent({
@@ -415,10 +415,8 @@ function RoomContent({
     };
   }, [room, setState, setAgentState, setMessages, setAttachments, currentBatchIdRef, onRequestDisconnect]);
 
-  // Render iOS audio manager when room is connected
-  if (room && room.state === ConnectionState.Connected) {
-    return <IOSAudioManager room={room} />;
-  }
+  // iOS audio manager DISABLED to avoid voice processing crash
+  // Audio is configured manually in handleConnect instead
   return null;
 }
 
@@ -530,12 +528,22 @@ export default function HomeScreen() {
 
       // Configure iOS audio for both playback and recording
       // This is critical for hearing Vera's voice on iOS
-      await AudioSession.setAppleAudioConfiguration({
-        audioCategory: 'playAndRecord',
-        audioCategoryOptions: ['defaultToSpeaker', 'allowBluetooth', 'mixWithOthers'],
-        audioMode: 'voiceChat',
-      });
-      await AudioSession.startAudioSession();
+      // NOTE: Using 'default' mode to avoid AVAudioEngine voice processing crash
+      try {
+        await AudioSession.stopAudioSession();
+        // Small delay to let iOS fully release audio resources
+        await new Promise(resolve => setTimeout(resolve, 100));
+        await AudioSession.setAppleAudioConfiguration({
+          audioCategory: 'playAndRecord',
+          audioCategoryOptions: ['defaultToSpeaker', 'allowBluetooth'],
+          audioMode: 'default',
+        });
+        await AudioSession.startAudioSession();
+      } catch (audioErr) {
+        console.warn('[AUDIO] Error configuring audio session:', audioErr);
+        // Try again with minimal config
+        await AudioSession.startAudioSession();
+      }
       console.log('[AUDIO] Audio session started with playAndRecord category');
 
       // Fetch token from server with unique room per user
