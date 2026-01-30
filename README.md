@@ -4,7 +4,7 @@ A voice-first AI assistant designed to help elderly users manage their emails th
 
 ## Why Vera?
 
-Vera is designed for an 88-year-old woman with hearing loss and technology anxiety. Instead of navigating complex email interfaces, she simply talks to Vera:
+Vera is designed for older adults who find technology overwhelming. Instead of navigating complex email interfaces, they simply talk to Vera:
 
 > "Vera, do I have any important emails?"
 >
