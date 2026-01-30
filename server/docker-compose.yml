@@ -23,6 +23,7 @@ services:
       - livekit-server
     volumes:
       - ./agent/vera_agent.py:/app/vera_agent.py
+      - ./agent/thinking-chime.mp3:/app/thinking-chime.mp3
     environment:
       - LIVEKIT_URL=ws://livekit-server:7880
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}

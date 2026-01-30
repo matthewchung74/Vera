@@ -13,9 +13,10 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy agent code and credentials
+# Copy agent code, credentials, and audio files
 COPY vera_agent.py .
 COPY google-credentials.json .
+COPY thinking-chime.mp3 .
 
 # Run the agent
 CMD ["python", "vera_agent.py", "start"]

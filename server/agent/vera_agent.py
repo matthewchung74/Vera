@@ -28,6 +28,9 @@ from livekit.agents import (
     cli,
     function_tool,
     RunContext,
+    BackgroundAudioPlayer,
+    AudioConfig,
+    BuiltinAudioClip,
 )
 from livekit.agents.voice import AgentSession, Agent, room_io
 from livekit.plugins import google, silero, deepgram
@@ -2305,6 +2308,13 @@ async def entrypoint(ctx: JobContext):
         agent=agent,
         room_options=room_options,
     )
+
+    # Background audio player - plays chime during tool calls (email search, web search, etc.)
+    background_audio = BackgroundAudioPlayer(
+        thinking_sound=AudioConfig("/app/thinking-chime.mp3", volume=0.6),
+    )
+    await background_audio.start(room=ctx.room, agent_session=session)
+    logger.info("Background audio player started for thinking sounds")
 
     logger.info(f"Vera is now listening with email tools...")
 
