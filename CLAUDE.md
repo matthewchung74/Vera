@@ -77,9 +77,19 @@ Vera/
 
 ## Running
 
-### 1. Start Server
+### 1. Start Server (Local)
 ```bash
 cd server && docker compose up -d
+```
+
+### Production Server
+```bash
+# SSH access
+ssh ubuntu@144.217.241.152
+
+# Deploy changes
+git push origin main
+ssh ubuntu@144.217.241.152 "cd ~/Vera && git pull origin main && sudo docker compose -f server/docker-compose.yml restart vera-agent"
 ```
 
 ### 2. Run Mobile App
