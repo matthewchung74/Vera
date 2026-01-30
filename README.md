@@ -4,7 +4,9 @@ A voice-first AI assistant designed to help elderly users manage their emails th
 
 ## Why Vera?
 
-Vera is designed for older adults who find technology overwhelming. Instead of navigating complex email interfaces, they simply talk to Vera:
+My mom loves technology but when it comes to using it, she's unsure which button to press, and scam or malicious emails scare her. Vera removes the button barrier and puts her mind at ease when a scary email comes in.
+
+Instead of navigating complex email interfaces, she simply talks to Vera:
 
 > "Vera, do I have any important emails?"
 >
@@ -134,6 +136,12 @@ Vera provides these email capabilities via Gemini 3 function calling:
 - **Voice**: LiveKit Agents SDK
 - **Mobile**: React Native (Expo)
 - **Session Storage**: Redis
+
+## Roadmap
+
+- Inline phishing/"risky sender" warnings before reading suspicious emails
+- Voice-driven calendar and task actions
+- Offline triage mode with on-device summaries
 
 ## License
 
