@@ -139,9 +139,18 @@ Vera provides these email capabilities via Gemini 3 function calling:
 
 ## Roadmap
 
-- Inline phishing/"risky sender" warnings before reading suspicious emails
-- Voice-driven calendar and task actions
-- Offline triage mode with on-device summaries
+**Technical improvements:**
+- Local voice activity detection and interrupt handling to reduce latency and server dependency
+- Offline "triage later" mode with on-device summaries for spotty connections
+
+**Senior-focused features:**
+- **Medication reminders** — "Time to take your afternoon pills"
+- **Daily briefings** — "Good morning, you have a doctor's appointment at 2pm and one email from Sarah"
+- **Emergency shortcut** — "Vera, call my daughter" or "Vera, I need help" for quick access to family or 911
+- **Bill due alerts** — proactive warnings about upcoming payments found in emails
+- **Scam call screening** — extend phishing protection beyond email to incoming calls
+- **Family check-in** — optional ping to family members so they know mom is okay
+- **Calendar integration** — "Add this appointment to my calendar" / "What do I have tomorrow?"
 
 ## License
 
