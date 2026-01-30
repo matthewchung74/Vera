@@ -61,14 +61,7 @@ Vera is a voice AI assistant that helps elderly users (primarily an 88-year-old 
 
 ```
 Vera/
-├── vera-ios/             # Native Swift iOS app (RECOMMENDED)
-│   ├── VoiceAgent.xcodeproj
-│   └── VoiceAgent/
-│       ├── VoiceAgentApp.swift    # App entry, LiveKit config
-│       ├── App/                    # StartView, AppView
-│       └── Media/                  # AgentView (audio visualizer)
-│
-├── vera-mobile/          # React Native (Expo) app (alternative)
+├── vera-mobile/          # React Native (Expo) app
 │   ├── app/              # Screens (Expo Router)
 │   └── src/
 │       ├── components/   # VADOrb
@@ -89,14 +82,7 @@ Vera/
 cd server && docker compose up -d
 ```
 
-### 2. Run Native iOS App (Recommended)
-```bash
-cd vera-ios
-open VoiceAgent.xcodeproj
-# Press Cmd+R in Xcode to build and run
-```
-
-### 2b. Alternative: React Native App
+### 2. Run Mobile App
 ```bash
 cd vera-mobile
 npm install

@@ -35,7 +35,7 @@ Vera is powered by **Gemini 3 Flash** with native tool use:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Mobile App (React Native / Swift)              │
+│              Mobile App (React Native / Expo)               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
 │  │ OAuth        │  │ Email        │  │   LiveKit        │   │
 │  │ (Gmail/MSFT) │  │ Service      │  │ (Voice + WebRTC) │   │
@@ -63,7 +63,7 @@ Vera is powered by **Gemini 3 Flash** with native tool use:
 ### Prerequisites
 
 - Docker & Docker Compose
-- Xcode 15+ (for iOS) or Node.js 18+ (for React Native)
+- Node.js 18+
 - Google API Key with Gemini 3 access
 - Deepgram API Key (for STT/TTS)
 
@@ -76,15 +76,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-### 2. Run the iOS App (Recommended)
-
-```bash
-cd vera-ios
-open VoiceAgent.xcodeproj
-# Press Cmd+R in Xcode
-```
-
-### 2b. Alternative: React Native App
+### 2. Run the Mobile App
 
 ```bash
 cd vera-mobile
@@ -103,10 +95,7 @@ Vera/
 │   └── agent/
 │       └── vera_agent.py # Voice agent + Gemini 3
 │
-├── vera-ios/             # Native Swift iOS app
-│   └── VoiceAgent/
-│
-└── vera-mobile/          # React Native (Expo) alternative
+└── vera-mobile/          # React Native (Expo) app
     └── app/
 ```
 
@@ -135,8 +124,7 @@ Vera provides these email capabilities via Gemini 3 function calling:
 ## Documentation
 
 - [Server Setup](server/README.md) - Backend deployment guide
-- [iOS App](vera-ios/README.md) - Native Swift app details
-- [React Native](vera-mobile/README.md) - Expo app alternative
+- [Mobile App](vera-mobile/README.md) - React Native app details
 
 ## Tech Stack
 
@@ -144,7 +132,7 @@ Vera provides these email capabilities via Gemini 3 function calling:
 - **STT**: Deepgram Nova 3
 - **TTS**: Deepgram Aura 2 (Thalia voice)
 - **Voice**: LiveKit Agents SDK
-- **Mobile**: SwiftUI / React Native (Expo)
+- **Mobile**: React Native (Expo)
 - **Session Storage**: Redis
 
 ## License

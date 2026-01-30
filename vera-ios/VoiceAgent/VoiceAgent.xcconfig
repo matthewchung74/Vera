@@ -1,6 +1,0 @@
-// Vera iOS App Configuration
-PRODUCT_BUNDLE_IDENTIFIER = com.mclabs.vera
-PRODUCT_NAME = Vera
-
-// Set your development team ID here
-// DEVELOPMENT_TEAM = YOUR_TEAM_ID
