@@ -168,7 +168,7 @@ MAX_PDF_PAGES = 5
 MAX_PDF_WORDS = 2000
 ATTACHMENT_TIMEOUT_SECONDS = 10
 
-# Vera's base system instructions
+# Vera's base system instructions (date is prepended dynamically in VeraAgent.__init__)
 VERA_BASE_INSTRUCTIONS = """You are Vera, a warm and helpful voice assistant designed for elderly users.
 
 Your personality:
@@ -274,10 +274,11 @@ class VeraAgent(Agent):
     """Custom Vera agent with email search tools."""
 
     def __init__(self, gmail_token: str = "", outlook_token: str = "", user_name: str = "", room: Optional[rtc.Room] = None):
-        # Build instructions with user name if available
-        instructions = VERA_BASE_INSTRUCTIONS
+        # Build instructions with current date and user name
+        today = datetime.now().strftime("%A, %B %d, %Y")  # e.g., "Tuesday, February 04, 2026"
+        instructions = f"Today's date is {today}.\n\n{VERA_BASE_INSTRUCTIONS}"
         if user_name:
-            instructions = f"The user's name is {user_name}. Use their name occasionally to make the conversation personal.\n\n{VERA_BASE_INSTRUCTIONS}"
+            instructions = f"The user's name is {user_name}. Use their name occasionally to make the conversation personal.\n\n" + instructions
 
         # Include Google Search and Code Execution as provider tools
         provider_tools = [
