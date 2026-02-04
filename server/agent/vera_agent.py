@@ -736,13 +736,15 @@ class VeraAgent(Agent):
         self,
         context: RunContext,
         count: int = 5,
+        unread_only: bool = True,
     ) -> str:
-        """Get the most recent emails from the user's inbox.
+        """Get emails from the user's inbox. By default returns only unread/new emails.
 
         Args:
-            count: Number of recent emails to retrieve (default 5, max 10)
+            count: Number of emails to retrieve (default 5, max 10)
+            unread_only: If True (default), only return unread/new emails. Set to False for all recent emails.
         """
-        logger.info(f"[TOOL] get_recent_emails called: count={count}")
+        logger.info(f"[TOOL] get_recent_emails called: count={count}, unread_only={unread_only}")
 
         count = min(count, 10)  # Cap at 10
         results = []
@@ -752,10 +754,10 @@ class VeraAgent(Agent):
         # Get from Gmail
         if self.gmail_token:
             try:
-                gmail_results, auth_ok = await self._get_recent_gmail(count)
+                gmail_results, auth_ok = await self._get_recent_gmail(count, unread_only)
                 if auth_ok:
                     results.extend(gmail_results)
-                    logger.info(f"[TOOL] Gmail returned {len(gmail_results)} recent emails")
+                    logger.info(f"[TOOL] Gmail returned {len(gmail_results)} emails (unread_only={unread_only})")
                 else:
                     gmail_auth_failed = True
                     logger.error("[TOOL] Gmail authentication failed (401)")
@@ -765,10 +767,10 @@ class VeraAgent(Agent):
         # Get from Outlook
         if self.outlook_token:
             try:
-                outlook_results, auth_ok = await self._get_recent_outlook(count)
+                outlook_results, auth_ok = await self._get_recent_outlook(count, unread_only)
                 if auth_ok:
                     results.extend(outlook_results)
-                    logger.info(f"[TOOL] Outlook returned {len(outlook_results)} recent emails")
+                    logger.info(f"[TOOL] Outlook returned {len(outlook_results)} emails (unread_only={unread_only})")
                 else:
                     outlook_auth_failed = True
                     logger.error("[TOOL] Outlook authentication failed (401)")
@@ -797,7 +799,10 @@ class VeraAgent(Agent):
             if not searched:
                 return "I cannot access any email accounts right now. Please reconnect them in the app settings."
 
-            return f"I checked your {' and '.join(searched)} but found no recent emails."
+            if unread_only:
+                return f"I checked your {' and '.join(searched)} but found no unread emails. Good news - you're all caught up!"
+            else:
+                return f"I checked your {' and '.join(searched)} but found no recent emails."
 
         # Sort by date and take top N
         results.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
@@ -808,7 +813,8 @@ class VeraAgent(Agent):
         self._cache_timestamp = time.time()
 
         # Format results - never mention email IDs to user
-        output = f"Your {len(results)} most recent emails:\n\n"
+        email_type = "unread" if unread_only else "most recent"
+        output = f"You have {len(results)} {email_type} email(s):\n\n"
         for i, email in enumerate(results, 1):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
@@ -1440,11 +1446,13 @@ class VeraAgent(Agent):
 
         return "(Could not extract email body)"
 
-    async def _get_recent_gmail(self, count: int) -> tuple:
+    async def _get_recent_gmail(self, count: int, unread_only: bool = True) -> tuple:
         """Get recent Gmail messages. Returns (results, auth_ok)."""
         async with aiohttp.ClientSession() as session:
             url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages"
             params = {"maxResults": count}
+            if unread_only:
+                params["q"] = "is:unread"
             headers = {"Authorization": f"Bearer {self.gmail_token}"}
 
             async with session.get(url, params=params, headers=headers) as resp:
@@ -1953,7 +1961,7 @@ class VeraAgent(Agent):
             "body": msg.get("body", {}).get("content", "(No content)"),
         }
 
-    async def _get_recent_outlook(self, count: int) -> tuple:
+    async def _get_recent_outlook(self, count: int, unread_only: bool = True) -> tuple:
         """Get recent Outlook messages. Returns (results, auth_ok)."""
         async with aiohttp.ClientSession() as session:
             url = "https://graph.microsoft.com/v1.0/me/messages"
@@ -1962,6 +1970,8 @@ class VeraAgent(Agent):
                 "$orderby": "receivedDateTime desc",
                 "$select": "id,from,subject,receivedDateTime,bodyPreview",  # Added bodyPreview for snippets
             }
+            if unread_only:
+                params["$filter"] = "isRead eq false"
             headers = {"Authorization": f"Bearer {self.outlook_token}"}
 
             async with session.get(url, params=params, headers=headers) as resp:
