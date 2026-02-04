@@ -2273,6 +2273,7 @@ async def entrypoint(ctx: JobContext):
         turn_detection="vad",
         allow_interruptions=True,
         min_interruption_duration=2.0,  # Require 2 seconds of speech to interrupt
+        max_tool_steps=8,  # Allow more consecutive tool calls for email searches (default is 3)
     )
 
     # Create agent first so we can reference it in event handlers
