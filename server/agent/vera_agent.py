@@ -641,6 +641,10 @@ class VeraAgent(Agent):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
             output += f"   Date: {email['date']}\n"
+            # Include snippet preview so LLM can filter without reading each email
+            snippet = email.get('snippet', '')
+            if snippet:
+                output += f"   Preview: {snippet[:150]}{'...' if len(snippet) > 150 else ''}\n"
             # Cache for later detail lookup
             self._email_cache[email['id']] = email
             # Store mapping from list number to ID for easy reference
@@ -807,7 +811,12 @@ class VeraAgent(Agent):
         for i, email in enumerate(results, 1):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
-            output += f"   Date: {email['date']}\n\n"
+            output += f"   Date: {email['date']}\n"
+            # Include snippet preview so LLM can filter without reading each email
+            snippet = email.get('snippet', '')
+            if snippet:
+                output += f"   Preview: {snippet[:150]}{'...' if len(snippet) > 150 else ''}\n"
+            output += "\n"
             self._email_cache[email['id']] = email
             # Store mapping from list number to ID for easy reference
             self._email_cache[f"#{i}"] = email
@@ -1291,8 +1300,9 @@ class VeraAgent(Agent):
             return results, True
 
     async def _get_gmail_message_summary(self, session: aiohttp.ClientSession, msg_id: str) -> dict:
-        """Get summary of a Gmail message."""
+        """Get summary of a Gmail message including snippet preview."""
         url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}"
+        # format=metadata returns headers AND snippet (snippet is at top level, not in payload)
         params = {"format": "metadata", "metadataHeaders": ["From", "Subject", "Date"]}
         headers = {"Authorization": f"Bearer {self.gmail_token}"}
 
@@ -1302,11 +1312,15 @@ class VeraAgent(Agent):
             data = await resp.json()
 
         headers_list = data.get("payload", {}).get("headers", [])
+        # Snippet is at the top level of the response, not inside payload
+        snippet = data.get("snippet", "")
+
         email = {
             "id": f"gmail_{msg_id}",
             "from": "",
             "subject": "",
             "date": "",
+            "snippet": snippet,  # First ~100 chars of email body
             "timestamp": int(data.get("internalDate", 0)) // 1000,
         }
 
@@ -1880,7 +1894,7 @@ class VeraAgent(Agent):
             params = {
                 "$search": f'"{query}"',
                 "$top": 10,
-                "$select": "id,from,subject,receivedDateTime",
+                "$select": "id,from,subject,receivedDateTime,bodyPreview",  # Added bodyPreview for snippets
             }
             headers = {"Authorization": f"Bearer {self.outlook_token}"}
 
@@ -1906,6 +1920,7 @@ class VeraAgent(Agent):
                     "from": from_str,
                     "subject": msg.get("subject", "(No subject)"),
                     "date": msg.get("receivedDateTime", ""),
+                    "snippet": msg.get("bodyPreview", ""),  # First ~255 chars of email body
                     "timestamp": 0,  # Would need to parse date
                 }
                 results.append(email)
@@ -1944,7 +1959,7 @@ class VeraAgent(Agent):
             params = {
                 "$top": count,
                 "$orderby": "receivedDateTime desc",
-                "$select": "id,from,subject,receivedDateTime",
+                "$select": "id,from,subject,receivedDateTime,bodyPreview",  # Added bodyPreview for snippets
             }
             headers = {"Authorization": f"Bearer {self.outlook_token}"}
 
@@ -1969,6 +1984,7 @@ class VeraAgent(Agent):
                     "from": from_str,
                     "subject": msg.get("subject", "(No subject)"),
                     "date": msg.get("receivedDateTime", ""),
+                    "snippet": msg.get("bodyPreview", ""),  # First ~255 chars of email body
                     "timestamp": 0,
                 }
                 results.append(email)
