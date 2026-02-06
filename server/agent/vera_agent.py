@@ -199,6 +199,7 @@ TOOL SELECTION (important):
 - If someone asks "what is X?" and you're not certain, ALWAYS search before answering
 - For emails: use search_emails and get_email_details
 - For math: use code execution
+- For date/calendar questions (e.g., "is February 28 a Saturday?", "what day is March 5?"): use code execution with Python's datetime module to calculate the answer. You do NOT have access to a calendar app.
 - Do NOT search emails for web information like weather or stock prices
 
 RESPONSE TIMING (critical):
@@ -813,8 +814,18 @@ class VeraAgent(Agent):
         self._cache_timestamp = time.time()
 
         # Format results - never mention email IDs to user
+        # Use the actual total from the API if available (not just the fetch limit)
+        total_estimate = None
+        for r in results:
+            if "_total_estimate" in r:
+                total_estimate = r.pop("_total_estimate")
+                break
+
         email_type = "unread" if unread_only else "most recent"
-        output = f"You have {len(results)} {email_type} email(s):\n\n"
+        if total_estimate is not None and total_estimate > len(results):
+            output = f"You have {total_estimate} {email_type} emails. Here are the {len(results)} most recent:\n\n"
+        else:
+            output = f"You have {len(results)} {email_type} email(s):\n\n"
         for i, email in enumerate(results, 1):
             output += f"{i}. From: {email['from']}\n"
             output += f"   Subject: {email['subject']}\n"
@@ -1447,7 +1458,8 @@ class VeraAgent(Agent):
         return "(Could not extract email body)"
 
     async def _get_recent_gmail(self, count: int, unread_only: bool = True) -> tuple:
-        """Get recent Gmail messages. Returns (results, auth_ok)."""
+        """Get recent Gmail messages. Returns (results, auth_ok).
+        Results include a '_total_estimate' key on the first result if available."""
         async with aiohttp.ClientSession() as session:
             url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages"
             params = {"maxResults": count}
@@ -1465,12 +1477,17 @@ class VeraAgent(Agent):
                 data = await resp.json()
 
             messages = data.get("messages", [])
+            total_estimate = data.get("resultSizeEstimate", len(messages))
             results = []
 
             for msg in messages:
                 email = await self._get_gmail_message_summary(session, msg["id"])
                 if email:
                     results.append(email)
+
+            # Attach total estimate so caller can report the real count
+            if results:
+                results[0]["_total_estimate"] = total_estimate
 
             return results, True
 
@@ -2294,7 +2311,7 @@ async def entrypoint(ctx: JobContext):
         ),
         vad=silero.VAD.load(
             min_speech_duration=0.3,  # Require longer speech to trigger
-            min_silence_duration=0.5,  # Require longer silence to end turn
+            min_silence_duration=1.5,  # Wait 1.5s of silence before ending turn (elderly users pause often)
             activation_threshold=0.6,  # Higher threshold = less sensitive
         ),
         turn_detection="vad",
